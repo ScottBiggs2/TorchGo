@@ -30,42 +30,48 @@ class GameDataset(Dataset):
         state, pi, z = self.examples[idx]
         return state, pi, z
 
-# ------------------------------
-# 3.2 Loss Functions
-# ------------------------------
 def compute_loss(
-    policy_pred: torch.Tensor,  # [B,361], log-probabilities after log()
-    value_pred: torch.Tensor,   # [B,1]
-    pi_target: torch.Tensor,    # [B,361], probabilities from MCTS
-    z_target: torch.Tensor,     # [B,1], ±1 outcomes
+    policy_pred: torch.Tensor,  # [B,361], *softmax* probabilities
+    value_pred: torch.Tensor,   # [B,1], tanh outputs in [-1,+1]
+    pi_target: torch.Tensor,    # [B,361], MCTS visit‐count distribution (sum=1)
+    z_target: torch.Tensor,     # [B,1], exact ±1 labels from final outcome
     net: PolicyValueNet,
     l2_coef: float
 ) -> torch.Tensor:
     """
-    - policy_pred should be the log‐probabilities (i.e. log(policy) from net forward).
-    - pi_target is the MCTS‐derived target distribution.
-    - value_pred is the tanh output. z_target is ±1 real outcome.
-    Loss = λ1 * (z - v)^2  +  λ2 * ( - sum(pi_target * log(policy_pred)) )  +  λ3 * sum(W^2) over all weights.
-    Here we’ll just take λ1=1, λ2=1, λ3=l2_coef.
+    policy_pred:  [B,361] = softmax output
+    value_pred:   [B,1]   = tanh output in [-1,+1]
+    pi_target:    [B,361] = MCTS target probabilities (sum = 1)
+    z_target:     [B,1]   = ±1 final game outcomes (Black=+1, White=−1)
+
+    Loss = (value_loss) + (policy_loss) + (l2_coeff * ||θ||²)
+
+    - value_loss = MSE(value_pred, z_target)
+    - policy_loss = –∑(π_target · log π_pred) averaged over batch
+    - l2_loss = l2_coef * ∑‖param‖₂²
     """
-    # 1) Value loss: MSE
-    value_loss = F.mse_loss(value_pred.view(-1), z_target.view(-1))
 
-    # 2) Policy loss: cross‐entropy between π_target and predicted policy
-    #    policy_pred is log(prob) for numerical stability
-    policy_loss = -(pi_target * policy_pred).sum(dim=1).mean()
+    # 1) Value loss: MSE between tanh‐output in [-1,+1] and z_target ∈ {–1,+1}
+    #    If you instead want BCE, you would change value_pred→sigmoid and z_target→{0,1}.
+    value_pred_flat = value_pred.view(-1)       # [B]
+    z_flat = z_target.view(-1)                  # [B]
+    value_loss = F.mse_loss(value_pred_flat, z_flat)
 
-    # 3) L2 regularization
+    # 2) Policy loss: cross‐entropy between target π and predicted π
+    #    policy_pred is *softmax* over logits, so we take log once here:
+    logp = torch.log(policy_pred + 1e-8)        # [B,361]
+    policy_loss = - (pi_target * logp).sum(dim=1).mean()  # scalar
+
+    # 3) L2 regularization on all parameters
     l2_loss = torch.tensor(0.0, device=policy_pred.device)
     for param in net.parameters():
-        l2_loss += torch.norm(param, p=2) ** 2
+        l2_loss = l2_loss + torch.norm(param, p=2) ** 2
     l2_loss = l2_coef * l2_loss
 
     return value_loss + policy_loss + l2_loss
 
-# ------------------------------
-# 3.3 Training Configuration & Main Loop
-# ------------------------------
+
+
 def train_policy_value_net(
     net: PolicyValueNet,
     device: torch.device,
@@ -77,16 +83,17 @@ def train_policy_value_net(
     batch_size: int,
     epochs_per_iter: int,
     lr: float,
-    l2_coef: float
+    l2_coef: float,
+    classic_or_mini: bool, # True = mini (9x9), False = classic (19x19)
 ):
-    optimizer = optim.Adam(net.parameters(), lr=lr, weight_decay=0.0)
+    optimizer = optim.Adam(net.parameters(), lr=lr, weight_decay= 1e-4)
 
     for it in range(num_iterations):
         print(f"\n=== Iteration {it+1}/{num_iterations} ===")
         # 1) Generate self-play games and collect examples
         iteration_examples: List[Example] = []
         for g in range(games_per_iteration):
-            examples = play_self_play_game(net, device, num_playouts, c_puct)
+            examples = play_self_play_game(net, device, num_playouts, c_puct, classic_or_mini)
             iteration_examples.extend(examples)
             print(f"  Self-play game {g+1}/{games_per_iteration}: {len(examples)} positions.")
 
@@ -104,31 +111,25 @@ def train_policy_value_net(
         dataset = GameDataset(data_snapshot)
         loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
+        states, pi_targets, z_targets = next(iter(loader))
+
         net.train()
         for epoch in range(epochs_per_iter):
             epoch_loss = 0.0
             for states, pi_targets, z_targets in loader:
                 # states: [B,2,19,19], pi_targets: [B,361], z_targets: [B,1]
                 states = states.to(device)
-                pi_targets = pi_targets.to(device)
+                pi_targets = torch.nan_to_num(pi_targets).to(device) + 1e-8
                 z_targets = z_targets.to(device)
 
                 optimizer.zero_grad()
                 policy_out, value_out = net(states)      # policy_out: [B,361], value_out: [B,1]
-                log_policy = torch.log(policy_out + 1e-8)  # avoid log(0)
-                loss = compute_loss(log_policy, value_out, pi_targets, z_targets, net, l2_coef)
+                loss = compute_loss(policy_out, value_out, pi_targets, z_targets, net, l2_coef= 0.25)
+
                 loss.backward()
                 optimizer.step()
-
                 epoch_loss += loss.item()
             print(f"    Epoch {epoch+1}/{epochs_per_iter}: Loss = {epoch_loss/len(loader):.4f}")
 
-        # Model Saving - not yet implemented
-        # if (it+1)%save_every == 0 or (it+1) == num_iterations:
-        #     torch.save(net.state_dict(), "models/saved_models/policy_value_net_it_{it+1}.pth")
-
-        # 4) (Optional) Evaluate net against a fixed opponent or older snapshot
-        # For example, let net play 20 games vs. the previous iteration’s net and measure win-rate.
-
-    # After all iterations, return the trained net
     return net
+

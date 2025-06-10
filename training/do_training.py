@@ -1,7 +1,3 @@
-# This is a sample Python script.
-
-# Press ⌃R to execute it or replace it with your code.
-# Press Double ⇧ to search everywhere for classes, files, tool windows, actions, and settings.
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
@@ -14,7 +10,7 @@ from training.self_play_system import ReplayBuffer, play_self_play_game
 from training.training import train_policy_value_net
 from play.human_vs_model import play_vs_net
 
-def __main__():
+def do_training():
 
     BOARD_SIZE = 9
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -47,12 +43,9 @@ def __main__():
         l2_coef=l2_coef,
         classic_or_mini = True, # True = mini (9x9), False = classic (19x19)
     )
+
     torch.save(trained_net.state_dict(), "models/TorchGo-mini-test.pth")
-    # torch.save(trained_net.state_dict(), "models/TorchGo-classic-test.pth")
 
 # Press the green button in the gutter to run the script.
 if __name__ == '__main__':
-    __main__()
-
-# See PyCharm help at https://www.jetbrains.com/help/pycharm/
-
+    do_training()

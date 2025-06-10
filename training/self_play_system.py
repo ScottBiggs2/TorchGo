@@ -56,7 +56,8 @@ def play_self_play_game(
         device: torch.device,
         num_playouts: int,
         c_puct: float,
-        temp_threshold: int = 10
+        temp_threshold: int = 8,
+        classic_or_mini: bool = True, # mini
 ) -> List[Example]:
     """
     Play a full game via MCTS + the current policy_value_net.
@@ -68,6 +69,14 @@ def play_self_play_game(
     examples: List[Example] = []
     BOARD_SIZE = policy_value_net.BOARD_SIZE  # 19 for full size
     game = GoGame(BOARD_SIZE)
+
+    # End games of extrordinary length
+    if classic_or_mini == True:  # if mini or 9x9 board
+        komi = 0.5
+        max_moves = 256
+    else:
+        komi = 7.5 # traditional compensation for white playing 2nd
+        max_moves = 512
 
     move_count = 0
     while not game.game_over:
@@ -156,19 +165,15 @@ def play_self_play_game(
         else:
             game.play_move(chosen_move[0], chosen_move[1])
 
-        # game.print_board()
-        # game.print_move_log()
-        # print("Game Over:", game.game_over)
-        # print("Territory:", game.estimate_territory())
-        if move_count > 250:
-            game.game_over = True
-
         move_count += 1
+
+        if move_count > max_moves:
+            game.game_over = True
 
     # 7) Game is over: compute final outcome z from Black’s perspective
     terr = game.estimate_territory()
     b_ter = terr['black_territory']
-    w_ter = terr['white_territory']
+    w_ter = terr['white_territory'] + komi
     if b_ter > w_ter:
         z = +1.0
     elif w_ter > b_ter:
