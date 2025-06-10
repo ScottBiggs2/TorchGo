@@ -12,13 +12,14 @@ def review_game(
         policy_value_net: PolicyValueNet,
         device: torch.device,
         top_k: int,
+        board_size: int,
         return_moves=True,
     ):
     """
     Interactive review mode: user inputs moves one by one (or 'pass'), engine shows evaluation and suggestions.
     Tracks value estimates and territory estimates over the course of the game and plots them at the end.
     """
-    game = GoGame()
+    game = GoGame(board_size)
     move_history = []
     value_history = []
     territory_history = []

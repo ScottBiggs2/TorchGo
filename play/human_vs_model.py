@@ -130,6 +130,7 @@ def play_vs_net(policy_value_net: PolicyValueNet,
                 device,
                 num_playouts: int,
                 c_puct: float,
+                board_size: int ,
                 displays=False,
                 return_moves = False,
                 ):
@@ -140,7 +141,10 @@ def play_vs_net(policy_value_net: PolicyValueNet,
       - On net’s turn: run PUCT‐MCTS, show a policy heatmap, then apply argmax move.
     At each turn the board is re‐plotted so you can see the current position.
     """
-    game = GoGame()
+    game = GoGame(board_size)
+    BLACK = game.BLACK
+    WHITE = game.WHITE
+    BOARD_SIZE = gma.BOARD_SIZE
     human_color = None
     while human_color not in ['b', 'w']:
         human_color = input("Choose your color ([B]lack or [W]hite): ").strip().lower()
