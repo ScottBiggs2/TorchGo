@@ -302,7 +302,7 @@ def play_vs_net(policy_value_net: PolicyValueNet,
 
     if return_moves:
         print(f"Move recording: \n")
-        game.print_move_log
+        game.print_move_log()
 
     # After review ends, plot evaluation and territory over move number
     moves = list(range(len(evals)))

@@ -52,12 +52,6 @@ def run_mcts(root_game: GoGame,
             value_leaf = node.expand_and_evaluate(net, device)
 
         # 3) BACKPROPAGATION:
-        #    Propagate `value_leaf` up the path. At each parent, we update:
-        #       parent.visits += 1
-        #       parent.N[move] += 1
-        #       parent.W[move] += value_leaf
-        #       parent.Q[move] = parent.W[move] / parent.N[move]
-        #    Then flip sign of value_leaf as we go up, because value is from current player's perspective.
         for i in range(len(path) - 1):
             parent_node = path[i]
             child_node = path[i + 1]
