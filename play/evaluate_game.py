@@ -7,6 +7,7 @@ from boards.board_manager import GoGame
 from models.policy_value_model import PolicyValueNet
 from mcts.monte_carlo_tree_search_nodes import MCTSNode
 from training.self_play_system import state_to_tensor
+from play.human_vs_model import plot_board, plot_policy, get_user_move,
 
 def review_game(
         policy_value_net: PolicyValueNet,
