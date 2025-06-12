@@ -117,8 +117,8 @@ def get_user_move(game: GoGame):
         except ValueError:
             print("Invalid numbers. Try again.")
             continue
-        if not (0 <= x < BOARD_SIZE and 0 <= y < BOARD_SIZE):
-            print(f"Coordinates must be between 0 and {BOARD_SIZE-1}.")
+        if not (0 <= x < game.BOARD_SIZE and 0 <= y < game.BOARD_SIZE):
+            print(f"Coordinates must be between 0 and {game.BOARD_SIZE-1}.")
             continue
         if not game.is_legal(x, y):
             print(f"Move ({x}, {y}) is illegal. Try again.")
