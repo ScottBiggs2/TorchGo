@@ -17,7 +17,7 @@ def do_training():
     net = PolicyValueNet(BOARD_SIZE).to(device)
 
     # Hyperparameters
-    num_iterations = 32  # how many “generations” of self-play + training
+    num_iterations = 8  # how many “generations” of self-play + training
     games_per_iteration = 16  # how many self-play games each generation
     num_playouts = 64  # MCTS playouts per move (tune to budget)
     c_puct = 0.6
@@ -45,7 +45,7 @@ def do_training():
         classic_or_mini = True, # True = mini (9x9), False = classic (19x19)
     )
 
-    torch.save(trained_net.state_dict(), "models/TorchGo-mini-test.pth")
+    torch.save(trained_net.state_dict(), "models/TorchGo-mini-light.pth")
 
 # Press the green button in the gutter to run the script.
 if __name__ == '__main__':
