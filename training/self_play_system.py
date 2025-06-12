@@ -72,10 +72,10 @@ def play_self_play_game(
 
     # End games of extrordinary length
     if classic_or_mini == True:  # if mini or 9x9 board
-        komi = 0.5
-        max_moves = 256
+        komi = 0.5 # mostly just to break ties
+        max_moves = 128
     else:
-        komi = 7.5 # traditional compensation for white playing 2nd
+        komi = 6.5 # traditional compensation for white playing 2nd, usually between 5.5 and 7.5
         max_moves = 512
 
     move_count = 0

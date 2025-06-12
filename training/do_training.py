@@ -17,13 +17,14 @@ def do_training():
     net = PolicyValueNet(BOARD_SIZE).to(device)
 
     # Hyperparameters
-    num_iterations = 3  # how many “generations” of self-play + training
-    games_per_iteration = 1  # how many self-play games each generation
-    num_playouts = 8  # MCTS playouts per move (tune to budget)
+    num_iterations = 32  # how many “generations” of self-play + training
+    games_per_iteration = 16  # how many self-play games each generation
+    num_playouts = 64  # MCTS playouts per move (tune to budget)
     c_puct = 0.6
-    replay_capacity = 1024
+    temp_threshold = 8 # layer < temp: check all policy draws, layer < temp, check c_puct proportion of draws
+    replay_capacity = 4096
     batch_size = 64
-    epochs_per_iter = 5
+    epochs_per_iter = 1
     lr = 1e-3
     l2_coef = 1e-4
 

@@ -79,6 +79,7 @@ def train_policy_value_net(
     games_per_iteration: int,
     num_playouts: int,
     c_puct: float,
+    temp_threshold: int,
     replay_buffer: ReplayBuffer,
     batch_size: int,
     epochs_per_iter: int,
@@ -93,7 +94,7 @@ def train_policy_value_net(
         # 1) Generate self-play games and collect examples
         iteration_examples: List[Example] = []
         for g in range(games_per_iteration):
-            examples = play_self_play_game(net, device, num_playouts, c_puct, classic_or_mini)
+            examples = play_self_play_game(net, device, num_playouts, c_puct, temp_threshold, classic_or_mini)
             iteration_examples.extend(examples)
             print(f"  Self-play game {g+1}/{games_per_iteration}: {len(examples)} positions.")
 
