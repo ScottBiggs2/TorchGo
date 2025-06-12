@@ -29,6 +29,7 @@ def review_game(
     BLACK = game.BLACK
     WHITE = game.WHITE
 
+    NUM_MOVES = BOARD_SIZE * BOARD_SIZE
     print("Enter moves to review. Format: 'row col' (0-based). Type 'pass' to pass, 'done' to end review.")
 
     while True:
