@@ -6,7 +6,7 @@ from IPython.display import display
 from boards.board_manager import GoGame
 from models.policy_value_model import PolicyValueNet
 from mcts.monte_carlo_tree_search_nodes import MCTSNode
-from training.self_play_system import state_to_tensor
+from training.self_play_system import state_to_tensor, generate_influence_fields
 # ----------------------------------------------------------------------
 # Part 1: Plotting Helpers
 # ----------------------------------------------------------------------
@@ -184,6 +184,11 @@ def play_vs_net(policy_value_net: PolicyValueNet,
 
             # a) Compute raw policy (no MCTS)
             state_tensor = state_to_tensor(game, device).unsqueeze(0)  # [1,2,19,19]
+            state_tensor = torch.concat([state_tensor,
+                                         generate_influence_fields(state_tensor, sigma = 1),
+                                         generate_influence_fields(state_tensor, sigma = 3),
+                                         generate_influence_fields(state_tensor, sigma = 6)], dim = 1)
+
             with torch.no_grad():
                 raw_policy, eval = policy_value_net(state_tensor)  # [1,361], [1,1]
             raw_policy = raw_policy.squeeze(0)  # [361]

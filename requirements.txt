@@ -1,8 +1,10 @@
 ipython
 torch>=2.0.0
+torchvision==0.17.2
 numpy==1.26.4
 typing
 matplotlib
+time
 math
 collections
 random

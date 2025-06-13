@@ -1,7 +1,3 @@
-# This is a sample Python script.
-
-# Press ⌃R to execute it or replace it with your code.
-# Press Double ⇧ to search everywhere for classes, files, tool windows, actions, and settings.
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
@@ -20,9 +16,9 @@ def __main__():
     net = PolicyValueNet(BOARD_SIZE).to(device)
 
     # Hyperparameters
-    num_iterations = 8  # how many “generations” of self-play + training
-    games_per_iteration = 8  # how many self-play games each generation
-    num_playouts = 8  # MCTS playouts per move (tune to budget)
+    num_iterations = 1  # how many “generations” of self-play + training
+    games_per_iteration = 1  # how many self-play games each generation
+    num_playouts = 4  # MCTS playouts per move (tune to budget)
     c_puct = 0.8
     temp_threshold = 8  # layer < temp: check all policy draws, layer < temp, check c_puct proportion of draws
     replay_capacity = 1024
@@ -57,4 +53,3 @@ if __name__ == '__main__':
     __main__()
 
 # See PyCharm help at https://www.jetbrains.com/help/pycharm/
-

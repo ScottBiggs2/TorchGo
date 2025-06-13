@@ -20,6 +20,10 @@ class ResidualBlock(
         self.norm1 = nn.BatchNorm2d(out_channels)
         self.norm2 = nn.BatchNorm2d(out_channels)
 
+        # Why? Regularization effect of BN might gloss over subtle but extremely important feats.
+        # self.norm1 = nn.LayerNorm(out_channels)
+        # self.norm2 = nn.LayerNorm(out_channels)
+
         self.out_channels = out_channels
         self.in_channels = in_channels
 
@@ -40,7 +44,8 @@ class PolicyValueNet(nn.Module):
         self.BOARD_SIZE = BOARD_SIZE
 
         # Shared convolutional backbone
-        self.block_1 = ResidualBlock(2, 64)
+        # to do - expand and add deep skips
+        self.block_1 = ResidualBlock(8, 64) # changed from 2 when adding gaussian field support
         self.block_2 = ResidualBlock(64, 128)
         self.block_3 = ResidualBlock(128, 128)
         self.block_4 = ResidualBlock(128, 64)
@@ -66,22 +71,22 @@ class PolicyValueNet(nn.Module):
           - value:  [B, 1] tanh‐activated scalar in [-1, +1]
         """
         # Shared conv layers
-        x = F.relu(self.block_1(x))
-        x = F.relu(self.block_2(x))
-        x = F.relu(self.block_3(x))
-        x = F.relu(self.block_4(x))
+        x = F.elu(self.block_1(x)) # swapped relu for elu
+        x = F.elu(self.block_2(x))
+        x = F.elu(self.block_3(x))
+        x = F.elu(self.block_4(x))
 
-        p = F.relu(self.policy_block(x))
+        p = F.elu(self.policy_block(x))
         p = self.conv_policy(p)  # [B,1,19,19]
         p = p.view(x.shape[0], -1)  # [B,361]
-        p = F.relu(self.fc_policy_1(p))  # [B,361]
+        p = F.elu(self.fc_policy_1(p))  # [B,361]
         policy = F.softmax(self.fc_policy_2(p), dim=1)  # [B,361]
 
         # ----- Value head -----
-        v = F.relu(self.value_block(x))  # [B,64,19,19]
+        v = F.elu(self.value_block(x))  # [B,64,19,19]
         v = self.conv_value(v)  # [B,1,19,19]
         v = v.view(x.shape[0], -1)  # [B,361]
-        v = F.relu(self.fc_value1(v))  # [B,64]
+        v = F.elu(self.fc_value1(v))  # [B,64]
         logit = self.fc_value2(v)  # [B,1]
         value = torch.tanh(logit)
         # +1 Black is winning -1 White is winning

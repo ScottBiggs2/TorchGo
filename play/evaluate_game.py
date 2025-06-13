@@ -6,7 +6,7 @@ from IPython.display import display
 from boards.board_manager import GoGame
 from models.policy_value_model import PolicyValueNet
 from mcts.monte_carlo_tree_search_nodes import MCTSNode
-from training.self_play_system import state_to_tensor
+from training.self_play_system import state_to_tensor, generate_influence_fields
 from play.human_vs_model import plot_board, plot_policy, get_user_move
 
 def review_game(
@@ -39,6 +39,11 @@ def review_game(
 
         # Get network evaluation at current position
         state_tensor = state_to_tensor(game, device).unsqueeze(0)  # [1,2,BOARD_SIZE,BOARD_SIZE]
+        state_tensor = torch.concat( [state_tensor,
+                                      generatue_influence_fields(state_tensor, sigma = 1),
+                                      generate_influence_fields(state_tensor, sigma = 3),
+                                      generate_influence_fields(state_tensor, sigma = 6)], dim = 1 )
+
         with torch.no_grad():
             raw_policy, value = policy_value_net(state_tensor)
         raw_policy = raw_policy.squeeze(0)  # [NUM_MOVES]

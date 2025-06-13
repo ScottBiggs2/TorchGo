@@ -7,6 +7,37 @@ import torch.nn.functional as F
 
 from boards.board_manager import GoGame
 from models.policy_value_model import PolicyValueNet
+# from training.self_play_system import generate_influence_fields
+
+# make sure this is the same version as the one in self_play_system
+def generate_influence_fields(stone_tensor: torch.Tensor, sigma: float = 1) -> torch.Tensor:
+    """
+    Input:  stone_tensor of shape (bs, 2, 19, 19)
+    Output: influence_tensor of shape (bs, 2, 19, 19)
+    """
+    bs, ch, h, w = stone_tensor.shape
+    assert ch == 2, "Expected 2 input channels (black, white)"
+
+    # Build 2D Gaussian kernel
+    kernel_size = int(6 * sigma) | 1  # make it odd
+    coords = torch.arange(kernel_size) - kernel_size // 2
+    x_grid, y_grid = torch.meshgrid(coords, coords, indexing="ij")
+    gaussian_kernel = torch.exp(-(x_grid**2 + y_grid**2) / (2 * sigma**2))
+    gaussian_kernel /= gaussian_kernel.sum()  # Normalize
+    kernel = gaussian_kernel.unsqueeze(0).unsqueeze(0)  # shape (1,1,K,K)
+
+    # Prepare to convolve each color channel independently
+    kernel = kernel.to(stone_tensor.device)
+    influence = torch.zeros_like(stone_tensor)
+
+    for i in range(2):  # black, white
+        influence[:, i:i+1] = F.conv2d(
+            stone_tensor[:, i:i+1],  # shape (bs,1,19,19)
+            kernel, padding=kernel_size // 2
+        )
+
+    return influence
+
 
 class MCTSNode:
     __slots__ = (
@@ -57,7 +88,13 @@ class MCTSNode:
         else:
             prev = torch.zeros_like(current)  # [1,19,19]
 
+        # New idea - stack a few different kernel sizes of influence fields
         state_tensor = torch.stack([current, prev], dim=1)  # [1,2,19,19]
+        state_tensor = torch.concat([state_tensor,
+                                     generate_influence_fields(state_tensor, sigma = 1),
+                                     generate_influence_fields(state_tensor, sigma = 3),
+                                     generate_influence_fields(state_tensor, sigma = 6)], dim = 1)
+        #[1, 8, 19, 19]
 
         # 2) Forward pass
         with torch.no_grad():

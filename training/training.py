@@ -4,8 +4,11 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from torch.utils.data import DataLoader, Dataset
-import numpy as np
+from torchvision import transforms
+from torchvision.transforms import v2
 
+import time
+import numpy as np
 from typing import Tuple, List, Optional
 
 from boards.board_manager import GoGame
@@ -15,19 +18,27 @@ from training.self_play_system import ReplayBuffer, play_self_play_game
 
 Example = Tuple[torch.Tensor, torch.Tensor, torch.Tensor]
 
-
 # ------------------------------
 # 3.1 A PyTorch Dataset for our examples
 # ------------------------------
 class GameDataset(Dataset):
-    def __init__(self, examples: List[Example]):
+    def __init__(self, examples: List[Example], transforms = None):
         self.examples = examples
+        self.transforms = transforms
 
     def __len__(self):
         return len(self.examples)
 
     def __getitem__(self, idx: int):
-        state, pi, z = self.examples[idx]
+        # state, pi, z = self.examples[idx]
+        sample = self.examples[idx]
+
+        # Let's hope this doesn't nuke everything?
+        if self.transforms:
+            sample = self.transforms(sample)
+
+        state, pi, z = sample
+
         return state, pi, z
 
 def compute_loss(
@@ -89,14 +100,24 @@ def train_policy_value_net(
 ):
     optimizer = optim.Adam(net.parameters(), lr=lr, weight_decay= 1e-4)
 
+    # Needs work to correctly manage the Example tuple
+    # transform = transforms.Compose([
+    #     transforms.RandomHorizontalFlip(p = 0.5),
+    #     transforms.RandomVerticalFlip(p = 0.5),
+    # ])
+
+    iter_start = time.time()
     for it in range(num_iterations):
         print(f"\n=== Iteration {it+1}/{num_iterations} ===")
         # 1) Generate self-play games and collect examples
         iteration_examples: List[Example] = []
+        game_start_time = time.time()
+
         for g in range(games_per_iteration):
             examples = play_self_play_game(net, device, num_playouts, c_puct, temp_threshold, classic_or_mini)
             iteration_examples.extend(examples)
             print(f"  Self-play game {g+1}/{games_per_iteration}: {len(examples)} positions.")
+        game_end_time = time.time()
 
         # 2) Push examples into replay buffer
         replay_buffer.push(iteration_examples)
@@ -108,29 +129,33 @@ def train_policy_value_net(
             continue
 
         # Create a DataLoader over a snapshot of buffer’s contents (to avoid sampling anew each epoch)
+        # by randomly flipping on x and y axes we access all 4 axes of symmetry in Go
         data_snapshot = list(replay_buffer.buffer)
-        dataset = GameDataset(data_snapshot)
+        dataset = GameDataset(data_snapshot, transforms = None)  # inherits transform kwarg from torch Dataset
+        # dataset = GameDataset(data_snapshot)
         loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
-
         states, pi_targets, z_targets = next(iter(loader))
 
         net.train()
+        epoch_start = time.time()
         for epoch in range(epochs_per_iter):
             epoch_loss = 0.0
             for states, pi_targets, z_targets in loader:
-                # states: [B,2,19,19], pi_targets: [B,361], z_targets: [B,1]
+                # states: [B,4,19,19], pi_targets: [B,361], z_targets: [B,1]
                 states = states.to(device)
                 pi_targets = torch.nan_to_num(pi_targets).to(device) + 1e-8
                 z_targets = z_targets.to(device)
 
                 optimizer.zero_grad()
                 policy_out, value_out = net(states)      # policy_out: [B,361], value_out: [B,1]
-                loss = compute_loss(policy_out, value_out, pi_targets, z_targets, net, l2_coef= 0.25)
+                loss = compute_loss(policy_out, value_out, pi_targets, z_targets, net, l2_coef= 1e-2)
 
                 loss.backward()
                 optimizer.step()
                 epoch_loss += loss.item()
             print(f"    Epoch {epoch+1}/{epochs_per_iter}: Loss = {epoch_loss/len(loader):.4f}")
-
+        epoch_end = time.time()
+        iter_end = time.time()
+        print(f" === \n Iteration {it+1} took: {(iter_end - iter_start):.2f}s\n Games {(game_end_time - game_start_time)/games_per_iteration:.2f}s per game \n Epochs avg {(epoch_end - epoch_start)/epochs_per_iter:.2f}s per epoch \n ===")
     return net
 
