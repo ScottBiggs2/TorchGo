@@ -44,4 +44,26 @@ There's also an 'analysis' mode, which shows:
   * Returns top_k moves per position
 
 How to build: 
+
+
+Training and Hyperparameters:
+
+TorchGo-mini:
+* num_iterations = 1  # how many “generations” of self-play + training
+* games_per_iteration = 1  # how many self-play games each generation
+* num_playouts = 128  # MCTS playouts per move (tune to budget) - idea: gradually increase aross many iters?
+* c_puct = 0.8
+* temp_threshold = 8  # layer < temp: check all policy draws, layer < temp, check c_puct proportion of draws
+* replay_capacity = 1024
+* batch_size = 64
+* epochs_per_iter = 1
+* lr = 1e-3
+* l2_coef = 1e-4
+
+num_playouts is a critical hyperparam, and directly determines search strength and time per game.
+
+
+TorchGo-classic: 
+
+
 ...

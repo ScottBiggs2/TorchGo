@@ -13,17 +13,23 @@ from play.human_vs_model import play_vs_net
 def __main__():
     BOARD_SIZE = 9
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    net = PolicyValueNet(BOARD_SIZE).to(device)
+    net = PolicyValueNet(BOARD_SIZE)
+    net.load_state_dict(torch.load("models/TorchGo-mini-light.pth"))
+    net.to(device)
+
+    # Models Log (06/13):
+    # TorchGo-mini : 101 games
+    # TorchGo-classic : __
 
     # Hyperparameters
-    num_iterations = 1  # how many “generations” of self-play + training
-    games_per_iteration = 1  # how many self-play games each generation
-    num_playouts = 4  # MCTS playouts per move (tune to budget)
+    num_iterations = 10  # how many “generations” of self-play + training
+    games_per_iteration = 10  # how many self-play games each generation
+    num_playouts = 16  # MCTS playouts per move (tune to budget) - idea: gradually increase aross many iters?
     c_puct = 0.8
-    temp_threshold = 8  # layer < temp: check all policy draws, layer < temp, check c_puct proportion of draws
-    replay_capacity = 1024
-    batch_size = 64
-    epochs_per_iter = 1
+    temp_threshold = 4  # layer < temp: check all policy draws, layer < temp, check c_puct proportion of draws
+    replay_capacity = 4096
+    batch_size = 128
+    epochs_per_iter = 3
     lr = 1e-3
     l2_coef = 1e-4
 

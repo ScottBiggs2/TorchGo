@@ -45,22 +45,26 @@ class PolicyValueNet(nn.Module):
 
         # Shared convolutional backbone
         # to do - expand and add deep skips
-        self.block_1 = ResidualBlock(8, 64) # changed from 2 when adding gaussian field support
-        self.block_2 = ResidualBlock(64, 128)
+        self.block_1 = ResidualBlock(8, 128) # changed from 2 when adding gaussian field support
+        self.block_2 = ResidualBlock(128, 128)
         self.block_3 = ResidualBlock(128, 128)
-        self.block_4 = ResidualBlock(128, 64)
+        self.block_4 = ResidualBlock(128, 128)
 
         # Policy head: a 1×1 conv to 1 channel → flatten → softmax[361]
-        self.policy_block = ResidualBlock(64, 64)
-        self.conv_policy = nn.Conv2d(64, 1, kernel_size=1)
+        self.policy_block_1 = ResidualBlock(128, 128)
+        self.policy_block_2 = ResidualBlock(128, 128)
+        self.policy_block_3 = ResidualBlock(128, 128)
+        self.conv_policy = nn.Conv2d(128, 1, kernel_size=1)
         self.fc_policy_1 = nn.Linear(BOARD_SIZE * BOARD_SIZE, BOARD_SIZE * BOARD_SIZE)
         self.fc_policy_2 = nn.Linear(BOARD_SIZE * BOARD_SIZE, BOARD_SIZE * BOARD_SIZE)
 
         # Value head: a 1×1 conv to 1 channel → flatten → FC to 64 → FC to 1 → tanh
-        self.value_block = ResidualBlock(64, 64)
-        self.conv_value = nn.Conv2d(64, 1, kernel_size=1)
-        self.fc_value1 = nn.Linear(BOARD_SIZE * BOARD_SIZE, 64)
-        self.fc_value2 = nn.Linear(64, 1)
+        self.value_block_1 = ResidualBlock(128, 128)
+        self.value_block_2 = ResidualBlock(128, 128)
+        self.value_block_3 = ResidualBlock(128, 128)
+        self.conv_value = nn.Conv2d(128, 1, kernel_size=1)
+        self.fc_value1 = nn.Linear(BOARD_SIZE * BOARD_SIZE, 128)
+        self.fc_value2 = nn.Linear(128, 1)
 
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
@@ -76,14 +80,18 @@ class PolicyValueNet(nn.Module):
         x = F.elu(self.block_3(x))
         x = F.elu(self.block_4(x))
 
-        p = F.elu(self.policy_block(x))
+        p = F.elu(self.policy_block_1(x))
+        p = F.elu(self.policy_block_2(p))
+        p = F.elu(self.policy_block_3(p))
         p = self.conv_policy(p)  # [B,1,19,19]
         p = p.view(x.shape[0], -1)  # [B,361]
         p = F.elu(self.fc_policy_1(p))  # [B,361]
         policy = F.softmax(self.fc_policy_2(p), dim=1)  # [B,361]
 
         # ----- Value head -----
-        v = F.elu(self.value_block(x))  # [B,64,19,19]
+        v = F.elu(self.value_block_1(x))  # [B,64,19,19]
+        v = F.elu(self.value_block_2(v))  # [B,64,19,19]
+        v = F.elu(self.value_block_3(v))  # [B,64,19,19]
         v = self.conv_value(v)  # [B,1,19,19]
         v = v.view(x.shape[0], -1)  # [B,361]
         v = F.elu(self.fc_value1(v))  # [B,64]
