@@ -10,6 +10,8 @@ To-do:
   * LayerNorm?
   * Attention/transformer tricks to borrow? 
 * add time tracking to training to estimate total resource draw required for full training
+* correctly implement passing
+* make sure captured stones are correctly included in the determining score calculation. 
 
 About TorchGo:
 The TorchGo models have two components - the model and the search:

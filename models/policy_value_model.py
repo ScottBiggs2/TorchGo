@@ -50,13 +50,13 @@ class PolicyValueNet(nn.Module):
         self.block_3 = ResidualBlock(128, 128)
         self.block_4 = ResidualBlock(128, 128)
 
-        # Policy head: a 1×1 conv to 1 channel → flatten → softmax[361]
+        # Policy head: a 1×1 conv to 1 channel → flatten → softmax[361+1]
         self.policy_block_1 = ResidualBlock(128, 128)
         self.policy_block_2 = ResidualBlock(128, 128)
         self.policy_block_3 = ResidualBlock(128, 128)
         self.conv_policy = nn.Conv2d(128, 1, kernel_size=1)
-        self.fc_policy_1 = nn.Linear(BOARD_SIZE * BOARD_SIZE, BOARD_SIZE * BOARD_SIZE)
-        self.fc_policy_2 = nn.Linear(BOARD_SIZE * BOARD_SIZE, BOARD_SIZE * BOARD_SIZE)
+        self.fc_policy_1 = nn.Linear(BOARD_SIZE * BOARD_SIZE, BOARD_SIZE * BOARD_SIZE + 1)  # +1 for pass
+        self.fc_policy_2 = nn.Linear(BOARD_SIZE * BOARD_SIZE + 1, BOARD_SIZE * BOARD_SIZE + 1)  # +1 for pass
 
         # Value head: a 1×1 conv to 1 channel → flatten → FC to 64 → FC to 1 → tanh
         self.value_block_1 = ResidualBlock(128, 128)
@@ -71,7 +71,7 @@ class PolicyValueNet(nn.Module):
         Input:
           - x: [B, 2, 19, 19], dtype=float32
         Returns:
-          - policy: [B, 361] softmax probabilities over all board moves (flattened row‐major)
+          - policy: [B, 361+1] softmax probabilities over all board moves (flattened row‐major) plus pass
           - value:  [B, 1] tanh‐activated scalar in [-1, +1]
         """
         # Shared conv layers
@@ -85,8 +85,8 @@ class PolicyValueNet(nn.Module):
         p = F.elu(self.policy_block_3(p))
         p = self.conv_policy(p)  # [B,1,19,19]
         p = p.view(x.shape[0], -1)  # [B,361]
-        p = F.elu(self.fc_policy_1(p))  # [B,361]
-        policy = F.softmax(self.fc_policy_2(p), dim=1)  # [B,361]
+        p = F.elu(self.fc_policy_1(p))  # [B,361+1]
+        policy = F.softmax(self.fc_policy_2(p), dim=1)  # [B,361+1]
 
         # ----- Value head -----
         v = F.elu(self.value_block_1(x))  # [B,64,19,19]

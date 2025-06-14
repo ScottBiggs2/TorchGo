@@ -56,16 +56,21 @@ def plot_board(game: GoGame, ax=None):
 
 def plot_policy(game: GoGame, policy_tensor: torch.Tensor, ax=None):
     """
-    Overlay a heatmap of the policy distribution (length‐361 tensor) on the board grid.
+    Overlay a heatmap of the policy distribution (length‐361+1 tensor) on the board grid.
     Axes labeled 0..18; origin at bottom-left. Uses float normalization.
+    The last element of policy_tensor is the pass probability.
     """
     BOARD_SIZE = game.BOARD_SIZE
-    # Convert to numpy float and reshape to [19,19]
-    probs = policy_tensor.cpu().numpy().astype(np.float32).reshape((BOARD_SIZE, BOARD_SIZE))
-    # Normalize to [0,1] if not already
-    total = probs.sum()
+    # Convert to numpy float and reshape to [19,19] for board moves
+    probs = policy_tensor.cpu().numpy().astype(np.float32)
+    board_probs = probs[:-1].reshape((BOARD_SIZE, BOARD_SIZE))  # Exclude pass probability
+    pass_prob = probs[-1]  # Get pass probability
+    
+    # Normalize board moves to [0,1] if not already
+    total = board_probs.sum()
     if total > 0.0:
-        probs = probs / total
+        board_probs = board_probs / total
+    
     if ax is None:
         fig, ax = plt.subplots(figsize=(6, 6))
     else:
@@ -73,7 +78,7 @@ def plot_policy(game: GoGame, policy_tensor: torch.Tensor, ax=None):
 
     # Show heatmap with origin="lower" so (0,0) is bottom-left
     im = ax.imshow(
-        probs,
+        board_probs,
         cmap='hot',
         origin='lower',
         extent=[-0.5, BOARD_SIZE - 0.5, -0.5, BOARD_SIZE - 0.5],
@@ -89,7 +94,15 @@ def plot_policy(game: GoGame, policy_tensor: torch.Tensor, ax=None):
     ax.set_xlim(-0.5, BOARD_SIZE - 0.5)
     ax.set_ylim(-0.5, BOARD_SIZE - 0.5)
     ax.set_aspect('equal')
+    
+    # Add colorbar
     plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+    
+    # Add pass probability text box
+    props = dict(boxstyle='round', facecolor='wheat', alpha=0.5)
+    ax.text(0.05, 0.95, f'Pass: {pass_prob:.3f}', transform=ax.transAxes, fontsize=10,
+            verticalalignment='top', bbox=props)
+    
     plt.close(fig)
     return fig
 
@@ -137,8 +150,8 @@ def play_vs_net(policy_value_net: PolicyValueNet,
     """
     Let a human play against the network. You choose Black or White, then
     loop until game over:
-      - On human’s turn: prompt for a move (“x y” or “pass”).
-      - On net’s turn: run PUCT‐MCTS, show a policy heatmap, then apply argmax move.
+      - On human's turn: prompt for a move ("row column", "pass", or "end game").
+      - On net's turn: run PUCT‐MCTS, show a policy heatmap, then apply argmax move.
     At each turn the board is re‐plotted so you can see the current position.
     """
 
@@ -168,7 +181,7 @@ def play_vs_net(policy_value_net: PolicyValueNet,
                         (game.current_player == WHITE and not human_plays_black)
 
         if is_human_turn:
-            # Human’s move
+            # Human's move
             user_move = get_user_move(game)
             if user_move is None:
                 game.play_move()

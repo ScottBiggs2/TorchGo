@@ -62,6 +62,7 @@ class ReplayBuffer:
     def __len__(self) -> int:
         return len(self.buffer)
 
+# Return to this later to give PolicyValueNet the game at time t (present) and time t-1 for Ko rules
 def state_to_tensor(game: GoGame, device: torch.device) -> torch.Tensor:
     """
     Convert the current position into a [2,19,19] float32 tensor:
@@ -73,7 +74,7 @@ def state_to_tensor(game: GoGame, device: torch.device) -> torch.Tensor:
     BLACK = game.BLACK
     WHITE = game.WHITE
 
-    # We’ll put Black=1, White=1 on separate channels:
+    # We'll put Black=1, White=1 on separate channels:
     black_plane = (board == BLACK).to(torch.float32)  # 1.0 where Black stones
     white_plane = (board == WHITE).to(torch.float32)  # 1.0 where White stones
     state = torch.stack([black_plane, white_plane], dim=0)  # [2,19,19]
@@ -93,7 +94,7 @@ def play_self_play_game(
     Returns a list of training examples (state, pi, z).
 
     `temp_threshold`: the move index t at which we switch from sampling (when t < temp_threshold)
-    to picking argmax(π) (when t >= temp_threshold). This implements AlphaZero’s “temperature” scheme.
+    to picking argmax(π) (when t >= temp_threshold). This implements AlphaZero's "temperature" scheme.
     """
     examples: List[Example] = []
     BOARD_SIZE = policy_value_net.BOARD_SIZE  # 19 for full size
@@ -119,7 +120,7 @@ def play_self_play_game(
         # stacks to [1, 8, 19, 19] then squeezes out bs = 1 to [4, 19, 19]
 
         # 2) Run MCTS to obtain visit counts
-        #    We need not return the “best move” here; we want the full distribution π.
+        #    We need not return the "best move" here; we want the full distribution π.
         #    To do that, slightly modify run_mcts to return the root node itself.
         root = MCTSNode(game.clone(), parent=None, move=None)
         for _ in range(num_playouts):
@@ -157,13 +158,14 @@ def play_self_play_game(
             path[-1].visits += 1
 
         # 3) Extract π: normalize visits at root over all legal moves
-        pi = torch.zeros( (BOARD_SIZE**2), dtype=torch.float32, device=device)
+        pi = torch.zeros(BOARD_SIZE**2 + 1, dtype=torch.float32, device=device)  # +1 for pass
         total_N = 0
         for mv, child in root.children.items():
             if mv is None:
-                continue
-            idx = mv[0] * BOARD_SIZE + mv[1]
-            pi[idx] = root.N[mv]
+                pi[-1] = root.N[mv]  # Pass move is at the end
+            else:
+                idx = mv[0] * BOARD_SIZE + mv[1]
+                pi[idx] = root.N[mv]
             total_N += root.N[mv]
         if total_N > 0:
             pi /= total_N
@@ -171,8 +173,6 @@ def play_self_play_game(
         # 4) Decide next action: sample or argmax depending on move_count
         if move_count < temp_threshold:
             # Sample from π with temperature 1.0 (i.e. directly proportional)
-            # pi_numpy = pi.cpu().numpy()
-
             pi_numpy = pi.detach().numpy(force = True)
             legal_indices = pi_numpy.nonzero()[0]
             if legal_indices.size == 0:
@@ -181,12 +181,17 @@ def play_self_play_game(
                 probs = pi_numpy[legal_indices]
                 probs = probs / probs.sum()
                 chosen_idx = random.choices(legal_indices.tolist(), weights=probs.tolist(), k=1)[0]
-                x, y = divmod(chosen_idx, BOARD_SIZE)
-                chosen_move = (x, y)
+                if chosen_idx == BOARD_SIZE**2:  # Pass move
+                    chosen_move = None
+                else:
+                    x, y = divmod(chosen_idx, BOARD_SIZE)
+                    chosen_move = (x, y)
         else:
             # Deterministic: argmax
             top_idx = torch.argmax(pi).item()
             if pi[top_idx] == 0:
+                chosen_move = None
+            elif top_idx == BOARD_SIZE**2:  # Pass move
                 chosen_move = None
             else:
                 chosen_move = (top_idx // BOARD_SIZE, top_idx % BOARD_SIZE)
@@ -205,7 +210,7 @@ def play_self_play_game(
         if move_count > max_moves:
             game.game_over = True
 
-    # 7) Game is over: compute final outcome z from Black’s perspective
+    # 7) Game is over: compute final outcome z from Black's perspective
     terr = game.estimate_territory()
     b_ter = terr['black_territory']
     w_ter = terr['white_territory'] + komi

@@ -75,7 +75,7 @@ class MCTSNode:
     def expand_and_evaluate(self, net: PolicyValueNet, device: torch.device) -> float:
         """
         1) Build a tensor input [1,2,19,19] from self.game (current + previous board),
-        2) Call net to get (policy_probs [1,361], value [1,1]),
+        2) Call net to get (policy_probs [1,361+1], value [1,1]),
         3) Mask out illegal moves, renormalize priors,
         4) Store self.P = { (x,y) → prob, None→prob_pass },
            initialize self.N[...] = 0, self.W[...] = 0, self.Q[...] = 0 for all keys in self.P,
@@ -98,19 +98,19 @@ class MCTSNode:
 
         # 2) Forward pass
         with torch.no_grad():
-            policy_logits, value = net(state_tensor)  # policy_logits: [1,361], value: [1,1]
+            policy_logits, value = net(state_tensor)  # policy_logits: [1,361+1], value: [1,1]
 
-        policy_logits = policy_logits.squeeze(0).cpu()  # → [361]
+        policy_logits = policy_logits.squeeze(0).cpu()  # → [361+1]
         value = value.item()  # scalar
 
         # 3) Build a mask of legal moves
-        legal_mask = torch.zeros(self.game.BOARD_SIZE**2, dtype=torch.bool)
+        legal_mask = torch.zeros(self.game.BOARD_SIZE**2 + 1, dtype=torch.bool)  # +1 for pass
         for idx in range(self.game.BOARD_SIZE**2):
             x, y = divmod(idx, self.game.BOARD_SIZE)
             if self.game.is_legal(x, y):
                 legal_mask[idx] = True
-        # “Pass” is always legal
-        pass_prob = 0.0
+        # "Pass" is always legal
+        legal_mask[-1] = True
 
         # 4) Extract raw priors for legal moves
         priors = {}
@@ -120,10 +120,11 @@ class MCTSNode:
             legal_probs = legal_logits / legal_logits.sum().clamp(min=1e-8)  # normalize
             legal_indices = legal_mask.nonzero(as_tuple=False).squeeze(1).tolist()
             for i, idx in enumerate(legal_indices):
-                x, y = divmod(idx, self.game.BOARD_SIZE)
-                priors[(x, y)] = legal_probs[i].item()
-            # Assign some small epsilon to pass if you’d like or 0
-            priors[None] = 1e-6
+                if idx == self.game.BOARD_SIZE**2:  # Pass move
+                    priors[None] = legal_probs[i].item()
+                else:
+                    x, y = divmod(idx, self.game.BOARD_SIZE)
+                    priors[(x, y)] = legal_probs[i].item()
         else:
             # No legal board moves? Must pass
             priors[None] = 1.0
