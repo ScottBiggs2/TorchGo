@@ -14,7 +14,7 @@ def __main__():
     BOARD_SIZE = 9
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     net = PolicyValueNet(BOARD_SIZE)
-    net.load_state_dict(torch.load("models/TorchGo-mini-light.pth"))
+    # net.load_state_dict(torch.load("models/TorchGo-mini-light.pth"))
     net.to(device)
 
     # Models Log (06/13):
@@ -22,11 +22,11 @@ def __main__():
     # TorchGo-classic : __
 
     # Hyperparameters
-    num_iterations = 5  # how many “generations” of self-play + training
+    num_iterations = 1  # how many “generations” of self-play + training
     games_per_iteration = 10  # how many self-play games each generation
-    num_playouts = 128  # MCTS playouts per move (tune to budget) - idea: gradually increase aross many iters?
+    num_playouts = 64  # MCTS playouts per move (tune to budget) - idea: gradually increase aross many iters?
     c_puct = 0.8        #
-    temp_threshold = 8  # layer < temp: check all policy draws, layer < temp, check c_puct proportion of draws
+    temp_threshold = 4  # layer < temp: check all policy draws, layer < temp, get greedy
     replay_capacity = 8192
     batch_size = 256
     epochs_per_iter = 3
@@ -51,11 +51,11 @@ def __main__():
         classic_or_mini=True,  # True = mini (9x9), False = classic (19x19)
     )
 
-    torch.save(trained_net.state_dict(), "models/TorchGo-mini-light.pth")
+    torch.save(trained_net.state_dict(), "models/TorchGo-mini-test-2.pth")
 
 
 # Press the green button in the gutter to run the script.
 if __name__ == '__main__':
+    print("Starting main.py")
     __main__()
 
-# See PyCharm help at https://www.jetbrains.com/help/pycharm/
