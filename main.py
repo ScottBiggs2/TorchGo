@@ -18,17 +18,17 @@ def __main__():
     net.to(device)
 
     # Models Log (06/13):
-    # TorchGo-mini : 101 games
+    # TorchGo-mini : 101 games + 50
     # TorchGo-classic : __
 
     # Hyperparameters
-    num_iterations = 10  # how many “generations” of self-play + training
+    num_iterations = 5  # how many “generations” of self-play + training
     games_per_iteration = 10  # how many self-play games each generation
-    num_playouts = 16  # MCTS playouts per move (tune to budget) - idea: gradually increase aross many iters?
-    c_puct = 0.8
-    temp_threshold = 4  # layer < temp: check all policy draws, layer < temp, check c_puct proportion of draws
-    replay_capacity = 4096
-    batch_size = 128
+    num_playouts = 128  # MCTS playouts per move (tune to budget) - idea: gradually increase aross many iters?
+    c_puct = 0.8        #
+    temp_threshold = 8  # layer < temp: check all policy draws, layer < temp, check c_puct proportion of draws
+    replay_capacity = 8192
+    batch_size = 256
     epochs_per_iter = 3
     lr = 1e-3
     l2_coef = 1e-4
