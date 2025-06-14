@@ -251,9 +251,11 @@ def play_vs_net(policy_value_net: PolicyValueNet,
                 path[-1].visits += 1
 
             # Extract the visit‐count distribution π
-            pi_tensor = torch.zeros(NUM_MOVES, device=device)
+            pi_tensor = torch.zeros(NUM_MOVES + 1, device=device)  # +1 for pass
             for mv, child in root.children.items():
-                if mv is not None:
+                if mv is None:
+                    pi_tensor[-1] = root.N[mv]  # Pass move is at the end
+                else:
                     idx = mv[0] * BOARD_SIZE + mv[1]
                     pi_tensor[idx] = root.N[mv]
             if pi_tensor.sum() > 0:
@@ -268,6 +270,8 @@ def play_vs_net(policy_value_net: PolicyValueNet,
             # Pick argmax move
             top_idx = torch.argmax(pi_tensor).item()
             if pi_tensor[top_idx] == 0:
+                net_move = None
+            elif top_idx == NUM_MOVES:  # Pass move
                 net_move = None
             else:
                 net_move = (top_idx // BOARD_SIZE, top_idx % BOARD_SIZE)
