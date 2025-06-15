@@ -17,18 +17,14 @@ def __main__():
     # net.load_state_dict(torch.load("models/TorchGo-mini-light.pth"))
     net.to(device)
 
-    # Models Log (06/13):
-    # TorchGo-mini : 101 games + 50
-    # TorchGo-classic : __
-
     # Hyperparameters
-    num_iterations = 1  # how many “generations” of self-play + training
-    games_per_iteration = 3  # how many self-play games each generation
+    num_iterations = 5  # how many “generations” of self-play + training
+    games_per_iteration = 10  # how many self-play games each generation
     num_playouts = 32  # MCTS playouts per move (tune to budget) - idea: gradually increase aross many iters?
     c_puct = 0.8        #
     temp_threshold = 4  # layer < temp: check all policy draws, layer < temp, get greedy
-    replay_capacity = 8192
-    batch_size = 64
+    replay_capacity = 20480
+    batch_size = 128
     epochs_per_iter = 3
     lr = 1e-3
     l2_coef = 1e-4
@@ -51,7 +47,7 @@ def __main__():
         classic_or_mini=True,  # True = mini (9x9), False = classic (19x19)
     )
 
-    torch.save(trained_net.state_dict(), "models/TorchGo-mini-test-2.pth")
+    torch.save(trained_net.state_dict(), "models/TorchGo-mini-test-3.pth")
 
 
 # Press the green button in the gutter to run the script.

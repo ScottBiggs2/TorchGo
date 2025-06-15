@@ -23,6 +23,7 @@ class GoGame:
         self.EMPTY = 0
         self.BLACK = -1
         self.WHITE = 1
+        self.komi = 7.5
 
         self.board = torch.zeros((BOARD_SIZE, BOARD_SIZE), dtype=torch.int8)
         self.history: List[torch.Tensor] = []
@@ -100,16 +101,28 @@ class GoGame:
         to_remove = []
         visited = set()
         x0, y0 = self.last_move
+        # print(f"\nChecking for captures after move at ({x0}, {y0})")
+        
         for nx, ny in self.get_neighbors(x0, y0):
             if (nx, ny) not in visited and self.board[nx, ny].item() == self.opponent(player):
+                # print(f"Found opponent stone at ({nx}, {ny})")
                 group = self._flood_fill_group(nx, ny, self.board, visited)
-                if self._count_liberties(group, self.board) == 0:
+                liberties = self._count_liberties(group, self.board)
+                # print(f"Group has {liberties} liberties")
+                if liberties == 0:
+                    # print(f"Group has no liberties, will be captured")
                     to_remove.extend(group)
+                # else:
+                #     # print(f"Group has liberties, not captured")
 
         if to_remove:
+            # print(f"Removing {len(to_remove)} stones")
             for rx, ry in to_remove:
                 self.board[rx, ry] = self.EMPTY
             self.captures[player] += len(to_remove)
+            # print(f"Total captures for {'Black' if player == self.BLACK else 'White'}: {self.captures[player]}")
+        # else:
+        #     print("No captures this move")
 
     def is_suicide(
         self,
@@ -212,7 +225,11 @@ class GoGame:
         self.last_move = (x, y)
 
         # Remove dead opponent stones and count captures
+        prev_captures = self.captures[self.current_player]
         self.remove_dead_stones(self.current_player)
+        new_captures = self.captures[self.current_player]
+        # if new_captures > prev_captures:
+            # print(f"{'Black' if self.current_player == self.BLACK else 'White'} captured {new_captures - prev_captures} stones")
 
         # Append to history for Ko
         self.history.append(self.copy_board())
@@ -225,39 +242,83 @@ class GoGame:
 
     def estimate_territory(self) -> dict:
         """
-        Count empty regions that are entirely surrounded by one color.
+        Implements area scoring rules:
+        1. Count all intersections enclosed by your stones (including empty points)
+        2. Add captured stones
+        3. Count empty points in moyo (large open areas) if bounded by your stones
+        4. Count empty points inside opponent's isolated groups (if they don't form their own territory)
+        
         Returns {'black_territory': int, 'white_territory': int}.
         """
         visited = set()
         territory = {self.BLACK: 0, self.WHITE: 0}
-
-        for i in range(self.BOARD_SIZE):
-            for j in range(self.BOARD_SIZE):
-                if (i, j) in visited or self.board[i, j].item() != self.EMPTY:
+        
+        def flood_fill_territory(x: int, y: int, owner: int) -> Tuple[set, set, bool]:
+            """
+            Flood fill from (x,y) to find all connected empty points and their borders.
+            Returns (empty_points, border_stones, has_opponent_wall)
+            """
+            empty_points = set()
+            border_stones = set()
+            has_opponent_wall = False
+            stack = [(x, y)]
+            
+            while stack:
+                cx, cy = stack.pop()
+                if (cx, cy) in visited:
                     continue
-
-                region = set()
-                border_colors = set()
-                stack = [(i, j)]
-                while stack:
-                    cx, cy = stack.pop()
-                    if (cx, cy) in visited:
-                        continue
+                    
+                val = self.board[cx, cy].item()
+                if val == self.EMPTY:
                     visited.add((cx, cy))
-                    region.add((cx, cy))
-
-                    for dx, dy in [(-1,0),(1,0),(0,-1),(0,1)]:
-                        nx, ny = cx + dx, cy + dy
-                        if self.is_on_board(nx, ny):
-                            val = self.board[nx, ny].item()
-                            if val == self.EMPTY:
+                    empty_points.add((cx, cy))
+                    
+                    # Check neighbors
+                    for nx, ny in self.get_neighbors(cx, cy):
+                        if (nx, ny) not in visited:
+                            nval = self.board[nx, ny].item()
+                            if nval == self.EMPTY:
                                 stack.append((nx, ny))
                             else:
-                                border_colors.add(val)
+                                border_stones.add((nx, ny))
+                                if nval == self.opponent(owner):
+                                    has_opponent_wall = True
+                elif val == owner:
+                    border_stones.add((cx, cy))
+                elif val == self.opponent(owner):
+                    has_opponent_wall = True
+                    
+            return empty_points, border_stones, has_opponent_wall
 
-                if len(border_colors) == 1:
-                    owner = next(iter(border_colors))
-                    territory[owner] += len(region)
+        # First pass: identify all empty regions and their borders
+        empty_regions = []
+        for i in range(self.BOARD_SIZE):
+            for j in range(self.BOARD_SIZE):
+                if (i, j) not in visited and self.board[i, j].item() == self.EMPTY:
+                    # Try both colors as potential owners
+                    for owner in [self.BLACK, self.WHITE]:
+                        empty_points, border_stones, has_opponent_wall = flood_fill_territory(i, j, owner)
+                        if empty_points:  # If we found a new region
+                            empty_regions.append((empty_points, border_stones, has_opponent_wall, owner))
+                            break  # Only need to check one color per empty point
+
+        # Second pass: score each region
+        for empty_points, border_stones, has_opponent_wall, owner in empty_regions:
+            # Count stones of each color in the border
+            border_counts = {self.BLACK: 0, self.WHITE: 0}
+            for x, y in border_stones:
+                border_counts[self.board[x, y].item()] += 1
+                
+            # Determine territory ownership
+            if not has_opponent_wall:  # No opponent stones touching the region
+                territory[owner] += len(empty_points)
+            # elif border_counts[owner] > border_counts[self.opponent(owner)]:
+            #     # Your stones form a stronger wall around the region
+            #     territory[owner] += len(empty_points)
+            # elif border_counts[owner] == border_counts[self.opponent(owner)]:
+            #     # Equal influence - split the territory
+            #     territory[owner] += len(empty_points) // 2
+            #     territory[self.opponent(owner)] += len(empty_points) // 2
 
         return {'black_territory': territory[self.BLACK],
                 'white_territory': territory[self.WHITE]}
@@ -273,7 +334,7 @@ class GoGame:
         white_ter = terr['white_territory']
         return {
             'black_score': black_ter + self.captures[self.BLACK],
-            'white_score': white_ter + self.captures[self.WHITE]
+            'white_score': white_ter + self.captures[self.WHITE] + self.komi
         }
 
     def print_board(self):

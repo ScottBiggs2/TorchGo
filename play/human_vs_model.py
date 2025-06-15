@@ -168,8 +168,8 @@ def play_vs_net(policy_value_net: PolicyValueNet,
     print(f"You are {'Black' if human_plays_black else 'White'}.\n")
 
     evals = []
-    white_terrs = []
-    black_terrs = []
+    white_scores = []
+    black_scores = []
 
     while not game.game_over:
         # Plot current board
@@ -227,12 +227,12 @@ def play_vs_net(policy_value_net: PolicyValueNet,
 
                 # Expansion & Evaluation
                 if node.game.game_over:
-                    terr = node.game.estimate_territory()
-                    b_ter = terr['black_territory']
-                    w_ter = terr['white_territory']
-                    if b_ter > w_ter:
+                    score = node.game.score()
+                    b_score = score['black_score']
+                    w_score = score['white_score']
+                    if b_score > w_score:
                         value_leaf = +1.0
-                    elif w_ter > b_ter:
+                    elif w_score > b_score:
                         value_leaf = -1.0
                     else:
                         value_leaf = 0.0
@@ -279,42 +279,42 @@ def play_vs_net(policy_value_net: PolicyValueNet,
 
             if net_move is None:
                 game.play_move()  # pass
-                terr = game.estimate_territory()
+                score = game.score()
 
-                black_terrs.append(terr['black_territory'])
-                white_terrs.append(terr['white_territory'])
+                black_scores.append(score['black_score'])
+                white_scores.append(score['white_score'])
 
                 print("Network passed.\n")
                 if displays:
-                    print(f"Scores: Black - {terr['black_territory']} | White - {terr['white_territory']}")
+                    print(f"Scores: Black - {score['black_score']} | White - {score['white_score']}")
                     print(f"Network win-odds evaluation: {eval} (Black winning: 1, Wite winning: -1)")
 
             else:
                 game.play_move(net_move[0], net_move[1])
-                terr = game.estimate_territory()
-                black_terrs.append(terr['black_territory'])
-                white_terrs.append(terr['white_territory'])
+                score = game.score()
+                black_scores.append(score['black_score'])
+                white_scores.append(score['white_score'])
 
                 print(f"Network plays at {net_move}.\n")
                 if displays:
-                    print(f"Scores: Black - {terr['black_territory']} | White - {terr['white_territory']}")
+                    print(f"Scores: Black - {score['black_score']} | White - {score['white_score']}")
                     print(f"Network win-odds evaluation: {eval} (Black winning: 1, Wite winning: -1)")
 
     # Game is over: show final board and result
     fig_final = plot_board(game)
     display(fig_final)
 
-    terr = game.estimate_territory()
-    b_ter = terr['black_territory']
-    w_ter = terr['white_territory']
-    print(f"Final score → Black: {b_ter}, White: {w_ter}")
-    if b_ter > w_ter:
+    score = game.score()
+    b_score = score['black_score']
+    w_score = score['white_score']
+    print(f"Final score → Black: {b_score}, White: {w_score}")
+    if b_score > w_score:
         print("Black wins!")
         if human_plays_black:
             print("You win!")
         else:
             print("Network wins!")
-    elif w_ter > b_ter:
+    elif w_score > b_score:
         print("White wins!")
         if not human_plays_black:
             print("You win!")
@@ -337,11 +337,11 @@ def play_vs_net(policy_value_net: PolicyValueNet,
     ax1.set_ylabel("Value (–1 to +1)")
     ax1.grid(True)
 
-    ax2.plot(moves, black_terrs, label="Black Territory")
-    ax2.plot(moves, white_terrs, label="White Territory")
-    ax2.set_title("Estimated Territory over Moves")
+    ax2.plot(moves, black_scores, label="Black Score")
+    ax2.plot(moves, white_scores, label="White Score")
+    ax2.set_title("Score over Moves")
     ax2.set_xlabel("Move Number")
-    ax2.set_ylabel("Territory Count")
+    ax2.set_ylabel("Score Count")
     ax2.legend()
     ax2.grid(True)
 

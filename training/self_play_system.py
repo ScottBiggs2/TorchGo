@@ -119,10 +119,8 @@ def play_self_play_game(
 
     # End games of extrordinary length
     if classic_or_mini == True:  # if mini or 9x9 board
-        komi = 6.5 # traditional compensation for white playing 2nd, usually between 5.5 and 7.5
         max_moves = 128
     else: # classic, 19x19
-        komi = 6.5 # traditional compensation for white playing 2nd, usually between 5.5 and 7.5
         max_moves = 256
 
     move_count = 0
@@ -151,12 +149,12 @@ def play_self_play_game(
                 path.append(node)
             # Expansion & Evaluation
             if node.game.game_over:
-                terr = node.game.estimate_territory()
-                b_ter = terr['black_territory']
-                w_ter = terr['white_territory']
-                if b_ter > w_ter:
+                score = node.game.score()
+                b_score = score['black_score']
+                w_score = score['white_score'] 
+                if b_score > w_score:
                     value_leaf = +1.0
-                elif w_ter > b_ter:
+                elif w_score > b_score:
                     value_leaf = -1.0
                 else:
                     value_leaf = 0.0
@@ -228,12 +226,12 @@ def play_self_play_game(
             game.game_over = True
 
     # 7) Game is over: compute final outcome z from Black's perspective
-    terr = game.estimate_territory()
-    b_ter = terr['black_territory']
-    w_ter = terr['white_territory'] + komi
-    if b_ter > w_ter:
+    score = game.score()
+    b_score = score['black_score']
+    w_score = score['white_score'] 
+    if b_score > w_score:
         z = +1.0
-    elif w_ter > b_ter:
+    elif w_score > b_score:
         z = -1.0
     else:
         z = 0.0
