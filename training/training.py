@@ -81,7 +81,47 @@ def compute_loss(
 
     return value_loss + policy_loss + l2_loss
 
+class GoBoardTransform:
+    """
+    Custom transform for Go board data augmentation.
+    Handles both state tensor [B,16,19,19] and policy tensor [B,361].
+    """
+    def __init__(self, p_horizontal: float = 0.5, p_vertical: float = 0.5):
+        self.p_horizontal = p_horizontal
+        self.p_vertical = p_vertical
 
+    def __call__(self, sample: Example) -> Example:
+        state, pi, z = sample
+        BOARD_SIZE = int(np.sqrt(pi.shape[-1]))  # 19 for classic, 9 for mini
+
+        # Randomly decide whether to flip
+        flip_h = np.random.random() < self.p_horizontal
+        flip_v = np.random.random() < self.p_vertical
+
+        if not (flip_h or flip_v):
+            return sample
+
+        # 1) Transform state tensor [B,16,19,19]
+        if flip_h:
+            state = torch.flip(state, dims=[-1])  # Flip last dimension (horizontal)
+        if flip_v:
+            state = torch.flip(state, dims=[-2])  # Flip second-to-last dimension (vertical)
+
+        # 2) Transform policy tensor [B,361]
+        if flip_h or flip_v:
+            # Reshape policy to 2D board
+            pi_2d = pi.view(-1, BOARD_SIZE, BOARD_SIZE)
+            
+            if flip_h:
+                pi_2d = torch.flip(pi_2d, dims=[-1])
+            if flip_v:
+                pi_2d = torch.flip(pi_2d, dims=[-2])
+            
+            # Reshape back to 1D
+            pi = pi_2d.view(-1, BOARD_SIZE * BOARD_SIZE)
+
+        # 3) Value z remains unchanged as it's game outcome
+        return state, pi, z
 
 def train_policy_value_net(
     net: PolicyValueNet,
@@ -105,6 +145,8 @@ def train_policy_value_net(
     #     transforms.RandomHorizontalFlip(p = 0.5),
     #     transforms.RandomVerticalFlip(p = 0.5),
     # ])
+    # Create dataset with Go board augmentation
+    transform = GoBoardTransform(p_horizontal=0.5, p_vertical=0.5)
 
     iter_start = time.time()
     for it in range(num_iterations):
@@ -131,8 +173,7 @@ def train_policy_value_net(
         # Create a DataLoader over a snapshot of buffer’s contents (to avoid sampling anew each epoch)
         # by randomly flipping on x and y axes we access all 4 axes of symmetry in Go
         data_snapshot = list(replay_buffer.buffer)
-        dataset = GameDataset(data_snapshot, transforms = None)  # inherits transform kwarg from torch Dataset
-        # dataset = GameDataset(data_snapshot)
+        dataset = GameDataset(data_snapshot, transforms = transform)
         loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
         states, pi_targets, z_targets = next(iter(loader))
 

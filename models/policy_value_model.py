@@ -45,7 +45,7 @@ class PolicyValueNet(nn.Module):
 
         # Shared convolutional backbone
         # to do - expand and add deep skips
-        self.block_1 = ResidualBlock(10, 128)  # 10 input channels: 4 board states + 6 influence fields
+        self.block_1 = ResidualBlock(16, 128)  # 16 input channels: 4 board states + 12 influence fields
         self.block_2 = ResidualBlock(128, 128)
         self.block_3 = ResidualBlock(128, 128)
         self.block_4 = ResidualBlock(128, 128)
