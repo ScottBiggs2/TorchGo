@@ -45,7 +45,7 @@ class PolicyValueNet(nn.Module):
 
         # Shared convolutional backbone
         # to do - expand and add deep skips
-        self.block_1 = ResidualBlock(8, 128) # changed from 2 when adding gaussian field support
+        self.block_1 = ResidualBlock(10, 128)  # 10 input channels: 4 board states + 6 influence fields
         self.block_2 = ResidualBlock(128, 128)
         self.block_3 = ResidualBlock(128, 128)
         self.block_4 = ResidualBlock(128, 128)
@@ -69,7 +69,15 @@ class PolicyValueNet(nn.Module):
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Input:
-          - x: [B, 2, 19, 19], dtype=float32
+          - x: [B, 10, 19, 19], dtype=float32
+            Channels:
+            - 0: Current black stones
+            - 1: Current white stones
+            - 2: Previous black stones
+            - 3: Previous white stones
+            - 4-5: Influence fields (sigma=1)
+            - 6-7: Influence fields (sigma=3)
+            - 8-9: Influence fields (sigma=6)
         Returns:
           - policy: [B, 361+1] softmax probabilities over all board moves (flattened row‐major) plus pass
           - value:  [B, 1] tanh‐activated scalar in [-1, +1]
