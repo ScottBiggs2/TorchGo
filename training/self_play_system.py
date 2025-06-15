@@ -11,11 +11,15 @@ from mcts.monte_carlo_tree_search_nodes import MCTSNode
 
 def generate_influence_fields(stone_tensor: torch.Tensor, sigma: float = 1) -> torch.Tensor:
     """
-    Input:  stone_tensor of shape (bs, 2, 19, 19)
-    Output: influence_tensor of shape (bs, 2, 19, 19)
+    Input:  stone_tensor of shape (bs, 4, 19, 19)
+           - channels 0,1: current board (black, white)
+           - channels 2,3: previous board (black, white)
+    Output: influence_tensor of shape (bs, 4, 19, 19)
+           - channels 0,1: influence fields for current board
+           - channels 2,3: influence fields for previous board
     """
     bs, ch, h, w = stone_tensor.shape
-    assert ch == 2, "Expected 2 input channels (black, white)"
+    assert ch == 4, "Expected 4 input channels (current black/white, previous black/white)"
 
     # Build 2D Gaussian kernel
     kernel_size = int(6 * sigma) | 1  # make it odd
@@ -29,7 +33,7 @@ def generate_influence_fields(stone_tensor: torch.Tensor, sigma: float = 1) -> t
     kernel = kernel.to(stone_tensor.device)
     influence = torch.zeros_like(stone_tensor)
 
-    for i in range(2):  # black, white
+    for i in range(ch):  # current black, current white, previous black, previous white
         influence[:, i:i+1] = F.conv2d(
             stone_tensor[:, i:i+1],  # shape (bs,1,19,19)
             kernel, padding=kernel_size // 2
@@ -126,11 +130,11 @@ def play_self_play_game(
         # 1) Build state tensor
         state_tensor = state_to_tensor(game, device).unsqueeze(0)  # [1, 4,19,19]
         state_tensor = torch.concat([state_tensor,
-                                     generate_influence_fields(state_tensor[:, :2], sigma=1),  # Only use current board for influence
-                                     generate_influence_fields(state_tensor[:, :2], sigma=3),
-                                     generate_influence_fields(state_tensor[:, :2], sigma=6)
+                                     generate_influence_fields(state_tensor, sigma=1),  # Use full state for influence
+                                     generate_influence_fields(state_tensor, sigma=3),
+                                     generate_influence_fields(state_tensor, sigma=6)
                                      ], dim=1).squeeze()
-        # stacks to [1, 10, 19, 19] then squeezes out bs = 1 to [10, 19, 19]
+        # stacks to [1, 16, 19, 19] then squeezes out bs = 1 to [16, 19, 19]
 
         # 2) Run MCTS to obtain visit counts
         #    We need not return the "best move" here; we want the full distribution π.

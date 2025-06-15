@@ -12,11 +12,15 @@ from models.policy_value_model import PolicyValueNet
 # make sure this is the same version as the one in self_play_system
 def generate_influence_fields(stone_tensor: torch.Tensor, sigma: float = 1) -> torch.Tensor:
     """
-    Input:  stone_tensor of shape (bs, 2, 19, 19)
-    Output: influence_tensor of shape (bs, 2, 19, 19)
+    Input:  stone_tensor of shape (bs, 4, 19, 19)
+           - channels 0,1: current board (black, white)
+           - channels 2,3: previous board (black, white)
+    Output: influence_tensor of shape (bs, 4, 19, 19)
+           - channels 0,1: influence fields for current board
+           - channels 2,3: influence fields for previous board
     """
     bs, ch, h, w = stone_tensor.shape
-    assert ch == 2, "Expected 2 input channels (black, white)"
+    assert ch == 4, "Expected 4 input channels (current black/white, previous black/white)"
 
     # Build 2D Gaussian kernel
     kernel_size = int(6 * sigma) | 1  # make it odd
@@ -30,7 +34,7 @@ def generate_influence_fields(stone_tensor: torch.Tensor, sigma: float = 1) -> t
     kernel = kernel.to(stone_tensor.device)
     influence = torch.zeros_like(stone_tensor)
 
-    for i in range(2):  # black, white
+    for i in range(ch):  # current black, current white, previous black, previous white
         influence[:, i:i+1] = F.conv2d(
             stone_tensor[:, i:i+1],  # shape (bs,1,19,19)
             kernel, padding=kernel_size // 2
@@ -88,13 +92,25 @@ class MCTSNode:
         else:
             prev = torch.zeros_like(current)  # [1,19,19]
 
-        # New idea - stack a few different kernel sizes of influence fields
-        state_tensor = torch.stack([current, prev], dim=1)  # [1,2,19,19]
+        # Convert to binary planes for each color
+        BLACK = self.game.BLACK
+        WHITE = self.game.WHITE
+        
+        # Current board
+        current_black = (current == BLACK).to(torch.float32)  # 1.0 where Black stones
+        current_white = (current == WHITE).to(torch.float32)  # 1.0 where White stones
+        
+        # Previous board
+        prev_black = (prev == BLACK).to(torch.float32)  # 1.0 where Black stones
+        prev_white = (prev == WHITE).to(torch.float32)  # 1.0 where White stones
+        
+        # Stack current and previous states
+        state_tensor = torch.stack([current_black, current_white, prev_black, prev_white], dim=1)  # [1,4,19,19]
         state_tensor = torch.concat([state_tensor,
-                                     generate_influence_fields(state_tensor, sigma = 1),
-                                     generate_influence_fields(state_tensor, sigma = 3),
-                                     generate_influence_fields(state_tensor, sigma = 6)], dim = 1)
-        #[1, 8, 19, 19]
+                                     generate_influence_fields(state_tensor, sigma=1),
+                                     generate_influence_fields(state_tensor, sigma=3),
+                                     generate_influence_fields(state_tensor, sigma=6)], dim=1)
+        #[1, 16, 19, 19]
 
         # 2) Forward pass
         with torch.no_grad():
