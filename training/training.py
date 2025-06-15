@@ -85,6 +85,7 @@ class GoBoardTransform:
     """
     Custom transform for Go board data augmentation.
     Handles both state tensor [B,16,19,19] and policy tensor [B,361].
+    The policy tensor includes an extra element at the end for passing.
     """
     def __init__(self, p_horizontal: float = 0.5, p_vertical: float = 0.5):
         self.p_horizontal = p_horizontal
@@ -92,7 +93,9 @@ class GoBoardTransform:
 
     def __call__(self, sample: Example) -> Example:
         state, pi, z = sample
-        BOARD_SIZE = int(np.sqrt(pi.shape[-1]))  # 19 for classic, 9 for mini
+        
+        # Get board size from state tensor (last two dimensions are equal)
+        BOARD_SIZE = state.shape[-1]  # 19 for classic, 9 for mini
 
         # Randomly decide whether to flip
         flip_h = np.random.random() < self.p_horizontal
@@ -107,18 +110,24 @@ class GoBoardTransform:
         if flip_v:
             state = torch.flip(state, dims=[-2])  # Flip second-to-last dimension (vertical)
 
-        # 2) Transform policy tensor [B,361]
+        # 2) Transform policy tensor [B,board_size**2+1]
         if flip_h or flip_v:
-            # Reshape policy to 2D board
-            pi_2d = pi.view(-1, BOARD_SIZE, BOARD_SIZE)
+            # Split policy into board moves and pass move
+            pi_board = pi[..., :-1]  # All but last element (board moves)
+            pi_pass = pi[..., -1:].unsqueeze(0)   # Last element (pass move)
+            
+            # Reshape board moves to 2D
+            pi_2d = pi_board.view(1, BOARD_SIZE, BOARD_SIZE)
             
             if flip_h:
                 pi_2d = torch.flip(pi_2d, dims=[-1])
             if flip_v:
                 pi_2d = torch.flip(pi_2d, dims=[-2])
             
-            # Reshape back to 1D
-            pi = pi_2d.view(-1, BOARD_SIZE * BOARD_SIZE)
+            # Reshape back to 1D and concatenate with pass move
+            pi_board = pi_2d.view(1, BOARD_SIZE * BOARD_SIZE)
+            # print(f"pi_board shape: {pi_board.shape}, pi_pass shape: {pi_pass.shape}")
+            pi = torch.cat([pi_board, pi_pass], dim=1)
 
         # 3) Value z remains unchanged as it's game outcome
         return state, pi, z
@@ -140,11 +149,6 @@ def train_policy_value_net(
 ):
     optimizer = optim.Adam(net.parameters(), lr=lr, weight_decay= 1e-4)
 
-    # Needs work to correctly manage the Example tuple
-    # transform = transforms.Compose([
-    #     transforms.RandomHorizontalFlip(p = 0.5),
-    #     transforms.RandomVerticalFlip(p = 0.5),
-    # ])
     # Create dataset with Go board augmentation
     transform = GoBoardTransform(p_horizontal=0.5, p_vertical=0.5)
 
@@ -173,7 +177,7 @@ def train_policy_value_net(
         # Create a DataLoader over a snapshot of buffer’s contents (to avoid sampling anew each epoch)
         # by randomly flipping on x and y axes we access all 4 axes of symmetry in Go
         data_snapshot = list(replay_buffer.buffer)
-        dataset = GameDataset(data_snapshot, transforms = transform)
+        dataset = GameDataset(data_snapshot, transforms = None) # transform not quite working
         loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
         states, pi_targets, z_targets = next(iter(loader))
 
