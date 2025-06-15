@@ -65,19 +65,32 @@ class ReplayBuffer:
 # Return to this later to give PolicyValueNet the game at time t (present) and time t-1 for Ko rules
 def state_to_tensor(game: GoGame, device: torch.device) -> torch.Tensor:
     """
-    Convert the current position into a [2,19,19] float32 tensor:
-      - channel 0: Black stones = 1.0, White stones = 0.0, Empty = 0.0
-      - channel 1: White stones = 1.0, Black stones = 0.0, Empty = 0.0
-    (Or alternatively use -1/1 encoding as you like. Just be consistent.)
+    Convert the current and previous positions into a [2,19,19] float32 tensor:
+      - channel 0: Current board - Black stones = 1.0, White stones = 0.0, Empty = 0.0
+      - channel 1: Previous board - Black stones = 1.0, White stones = 0.0, Empty = 0.0
     """
-    board = game.board.float().to(device)  # shape [19,19], values ∈ {-1,0,+1}
+    current = game.board.float().to(device)  # shape [19,19], values ∈ {-1,0,+1}
+    
+    # Get previous board state if it exists, otherwise use zeros
+    if game.history:
+        prev = game.history[-1].float().to(device)  # shape [19,19]
+    else:
+        prev = torch.zeros_like(current)  # shape [19,19]
+
+    # Convert to binary planes for each color
     BLACK = game.BLACK
     WHITE = game.WHITE
-
-    # We'll put Black=1, White=1 on separate channels:
-    black_plane = (board == BLACK).to(torch.float32)  # 1.0 where Black stones
-    white_plane = (board == WHITE).to(torch.float32)  # 1.0 where White stones
-    state = torch.stack([black_plane, white_plane], dim=0)  # [2,19,19]
+    
+    # Current board
+    current_black = (current == BLACK).to(torch.float32)  # 1.0 where Black stones
+    current_white = (current == WHITE).to(torch.float32)  # 1.0 where White stones
+    
+    # Previous board
+    prev_black = (prev == BLACK).to(torch.float32)  # 1.0 where Black stones
+    prev_white = (prev == WHITE).to(torch.float32)  # 1.0 where White stones
+    
+    # Stack current and previous states
+    state = torch.stack([current_black, current_white, prev_black, prev_white], dim=0)  # [4,19,19]
     return state
 
 
@@ -111,13 +124,13 @@ def play_self_play_game(
     move_count = 0
     while not game.game_over:
         # 1) Build state tensor
-        state_tensor = state_to_tensor(game, device).unsqueeze(0)  # [1, 2,19,19]
+        state_tensor = state_to_tensor(game, device).unsqueeze(0)  # [1, 4,19,19]
         state_tensor = torch.concat([state_tensor,
-                                     generate_influence_fields(state_tensor, sigma =1),
-                                     generate_influence_fields(state_tensor, sigma = 3),
-                                     generate_influence_fields(state_tensor, sigma=6)
-                                     ], dim = 1).squeeze()
-        # stacks to [1, 8, 19, 19] then squeezes out bs = 1 to [4, 19, 19]
+                                     generate_influence_fields(state_tensor[:, :2], sigma=1),  # Only use current board for influence
+                                     generate_influence_fields(state_tensor[:, :2], sigma=3),
+                                     generate_influence_fields(state_tensor[:, :2], sigma=6)
+                                     ], dim=1).squeeze()
+        # stacks to [1, 10, 19, 19] then squeezes out bs = 1 to [10, 19, 19]
 
         # 2) Run MCTS to obtain visit counts
         #    We need not return the "best move" here; we want the full distribution π.
