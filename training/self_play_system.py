@@ -150,7 +150,8 @@ def play_self_play_game(
                                      generate_influence_fields(state_tensor, sigma=3),
                                      generate_influence_fields(state_tensor, sigma=6)
                                      ], dim=1).squeeze()
-        print(f"State tensor shape: {state_tensor.shape}")
+        #State tensor shape: torch.Size([24, 9, 9])
+        # print(f"State tensor shape: {state_tensor.shape}")
         # 2) Run batched MCTS to obtain visit counts
         root_game = game.clone()
         best_move, root = run_batched_mcts(root_game,

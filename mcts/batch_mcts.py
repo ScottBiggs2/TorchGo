@@ -23,7 +23,7 @@ class BatchedMCTS:
     def _backpropagate(self, path: List[MCTSNode], leaf_value: float):
         """Backpropagate value with perspective flipping"""
         value = leaf_value
-        print(f"DEBUG: Starting backprop with leaf value: {value}")
+        # print(f"DEBUG: Starting backprop with leaf value: {value}")
         
         # Traverse backwards from leaf to root
         for i in range(len(path) - 1, -1, -1):  # Include leaf node
@@ -45,7 +45,7 @@ class BatchedMCTS:
                 node.W[move] += value
                 node.Q[move] = node.W[move] / node.N[move]
                 
-                print(f"DEBUG: Node {i} - Move: {move}, Visits: {node.visits}, N[move]: {node.N[move]}, W[move]: {node.W[move]}, Q[move]: {node.Q[move]}")
+                # print(f"DEBUG: Node {i} - Move: {move}, Visits: {node.visits}, N[move]: {node.N[move]}, W[move]: {node.W[move]}, Q[move]: {node.Q[move]}")
             
             # Flip value for parent's perspective
             value = -value
@@ -59,7 +59,7 @@ class BatchedMCTS:
         if not self.queue:
             return
             
-        print(f"\nDEBUG: Processing batch of {len(self.queue)} nodes")
+        # print(f"\nDEBUG: Processing batch of {len(self.queue)} nodes")
         
         # Filter out terminal nodes
         terminal_nodes = []
@@ -86,22 +86,22 @@ class BatchedMCTS:
             state_tensors = [node.get_state_tensor(self.device) for node in non_terminal_nodes]
             batch = torch.cat(state_tensors, dim=0)
             
-            print(f"DEBUG: Batch shape: {batch.shape}")
-            print(f"DEBUG: Batch values range: [{batch.min()}, {batch.max()}]")
+            # print(f"DEBUG: Batch shape: {batch.shape}")
+            # print(f"DEBUG: Batch values range: [{batch.min()}, {batch.max()}]")
             
             with torch.no_grad():
                 policy_logits_batch, values_batch = self.net(batch)
             policy_logits_batch = policy_logits_batch.cpu()
             values_batch = values_batch.squeeze(1).cpu().numpy()
             
-            print(f"DEBUG: Policy logits shape: {policy_logits_batch.shape}")
-            print(f"DEBUG: Policy logits range: [{policy_logits_batch.min()}, {policy_logits_batch.max()}]")
-            print(f"DEBUG: Values shape: {values_batch.shape}")
-            print(f"DEBUG: Values range: [{values_batch.min()}, {values_batch.max()}]")
+            # print(f"DEBUG: Policy logits shape: {policy_logits_batch.shape}")
+            # print(f"DEBUG: Policy logits range: [{policy_logits_batch.min()}, {policy_logits_batch.max()}]")
+            # print(f"DEBUG: Values shape: {values_batch.shape}")
+            # print(f"DEBUG: Values range: [{values_batch.min()}, {values_batch.max()}]")
             
             for (node, path), policy_logits, value in zip(
                 zip(non_terminal_nodes, non_terminal_paths), policy_logits_batch, values_batch):
-                print(f"DEBUG: Expanding node with value {value}")
+                # print(f"DEBUG: Expanding node with value {value}")
                 # Ensure we're expanding the node with the correct policy logits
                 if node.P is None:  # Double check node hasn't been expanded
                     self._expand_node(node, policy_logits)
@@ -117,8 +117,8 @@ class BatchedMCTS:
         board_size = node.game.BOARD_SIZE
         total_moves = board_size**2 + 1
         
-        print(f"\nDEBUG: Expanding node with policy logits shape: {policy_logits.shape}")
-        print(f"DEBUG: Policy logits values: {policy_logits}")
+        # print(f"\nDEBUG: Expanding node with policy logits shape: {policy_logits.shape}")
+        # print(f"DEBUG: Policy logits values: {policy_logits}")
         
         # Ensure policy_logits is 2D [batch=1, moves]
         if policy_logits.dim() == 1:
@@ -135,17 +135,17 @@ class BatchedMCTS:
         legal_mask[-1] = True  # Pass is always legal
         legal_moves.append(None)  # Add pass move
         
-        print(f"DEBUG: Found {len(legal_moves)} legal moves")
-        print(f"DEBUG: Legal mask: {legal_mask}")
+        # print(f"DEBUG: Found {len(legal_moves)} legal moves")
+        # print(f"DEBUG: Legal mask: {legal_mask}")
         
         # Apply mask and softmax
         masked_logits = policy_logits.clone()  # [1, moves]
         masked_logits[0, ~legal_mask] = -float('inf')  # Apply mask to first (and only) batch
-        print(f"DEBUG: Masked logits: {masked_logits}")
+        # print(f"DEBUG: Masked logits: {masked_logits}")
         
         # Apply softmax to get probabilities
         legal_probs = F.softmax(masked_logits, dim=1)  # [1, moves]
-        print(f"DEBUG: Legal probabilities after softmax: {legal_probs}")
+        # print(f"DEBUG: Legal probabilities after softmax: {legal_probs}")
         
         # Store priors
         priors = {}
@@ -158,7 +158,7 @@ class BatchedMCTS:
                 x, y = divmod(idx.item(), board_size)
                 priors[(x, y)] = prob
         
-        print(f"DEBUG: Priors before Dirichlet: {priors}")
+        # print(f"DEBUG: Priors before Dirichlet: {priors}")
         
         # Add Dirichlet noise during training at root
         if self.training and node.parent is None and priors:
@@ -169,7 +169,7 @@ class BatchedMCTS:
             moves = list(priors.keys())
             for i, move in enumerate(moves):
                 priors[move] = 0.75 * priors[move] + 0.25 * noise[i]
-            print(f"DEBUG: Priors after Dirichlet: {priors}")
+            # print(f"DEBUG: Priors after Dirichlet: {priors}")
         
         # Ensure no zero probabilities
         min_prob = 1e-8
@@ -182,7 +182,7 @@ class BatchedMCTS:
         for move in priors:
             priors[move] /= total_prob
         
-        print(f"DEBUG: Final normalized priors: {priors}")
+        # print(f"DEBUG: Final normalized priors: {priors}")
         
         # Set the node's priors and initialize statistics
         node.P = priors

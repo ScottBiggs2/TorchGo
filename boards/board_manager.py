@@ -254,7 +254,7 @@ class GoGame:
                     break
             
             if is_cycle:
-                print(f"DEBUG: Detected move cycle after {len(self.move_cycle)} moves. Ending game.")
+                # print(f"DEBUG: Detected move cycle after {len(self.move_cycle)} moves. Ending game.")
                 self.game_over = True
             
             # Keep only the last cycle_length * cycle_threshold moves

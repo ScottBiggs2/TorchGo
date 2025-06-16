@@ -19,8 +19,8 @@ def __main__():
 
     # Hyperparameters
     num_iterations = 1  # how many “generations” of self-play + training
-    games_per_iteration = 1  # how many self-play games each generation
-    num_playouts = 4  # MCTS playouts per move (tune to budget) - idea: gradually increase aross many iters?
+    games_per_iteration = 5  # how many self-play games each generation
+    num_playouts = 256  # MCTS playouts per move (tune to budget) - idea: gradually increase aross many iters?
     c_puct = 1.5        #
     temp_threshold = 4  # layer < temp: check all policy draws, layer < temp, get greedy
     replay_capacity = 20480

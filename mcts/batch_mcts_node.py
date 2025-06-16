@@ -117,7 +117,7 @@ class MCTSNode:
         parent_visits = self.visits
         sqrt_parent_visits = math.sqrt(parent_visits) if parent_visits > 0 else 1.0
 
-        print(f"DEBUG: Selecting child with {len(self.P)} moves available")
+        # print(f"DEBUG: Selecting child with {len(self.P)} moves available")
         for move, prior in self.P.items():
             n_sa = self.N[move]
             q_sa = self.Q[move]
@@ -129,7 +129,7 @@ class MCTSNode:
             # Add small epsilon to denominator to avoid division by zero
             u_sa = q_sa + c_puct * prior * sqrt_parent_visits / (1 + n_sa + virtual_loss + 1e-8)
             
-            print(f"DEBUG: Move {move} - N: {n_sa}, Q: {q_sa}, virtual_loss: {virtual_loss}, UCB: {u_sa}")
+            # print(f"DEBUG: Move {move} - N: {n_sa}, Q: {q_sa}, virtual_loss: {virtual_loss}, UCB: {u_sa}")
             
             if u_sa > best_score:
                 best_score = u_sa
@@ -139,11 +139,11 @@ class MCTSNode:
         if best_move in self.children:
             # Apply virtual loss when selecting
             self.virtual_loss[best_move] += 1
-            print(f"DEBUG: Reusing existing child for move {best_move}, virtual_loss now {self.virtual_loss[best_move]}")
+            # print(f"DEBUG: Reusing existing child for move {best_move}, virtual_loss now {self.virtual_loss[best_move]}")
             return best_move, self.children[best_move]
 
         # Only create a new child if we don't have one for this move
-        print(f"DEBUG: Creating new child for move {best_move}")
+        # print(f"DEBUG: Creating new child for move {best_move}")
         new_game = self.game.clone()
         if best_move is None:
             new_game.play_move()  # pass
@@ -153,44 +153,14 @@ class MCTSNode:
         child = MCTSNode(new_game, self, best_move)
         self.children[best_move] = child
         self.virtual_loss[best_move] += 1  # Apply virtual loss
-        print(f"DEBUG: Created new child for move {best_move}, virtual_loss: {self.virtual_loss[best_move]}")
+        # print(f"DEBUG: Created new child for move {best_move}, virtual_loss: {self.virtual_loss[best_move]}")
         return best_move, child
 
     def revert_virtual_loss(self, move):
         """Remove virtual loss after simulation completes"""
         if move in self.virtual_loss:
             self.virtual_loss[move] -= 1
-            print(f"DEBUG: Reverting virtual loss for move {move}, now {self.virtual_loss[move]}")
+            # print(f"DEBUG: Reverting virtual loss for move {move}, now {self.virtual_loss[move]}")
             if self.virtual_loss[move] == 0:
                 del self.virtual_loss[move]
-                print(f"DEBUG: Removed virtual loss for move {move}")
-
-    # def _backpropagate(self, path: List[MCTSNode], leaf_value: float):
-    #     """Backpropagate value with perspective flipping"""
-    #     value = leaf_value
-    #     print(f"DEBUG: Starting backprop with leaf value: {value}")
-        
-    #     # Traverse backwards from leaf to root
-    #     for i in range(len(path) - 1, -1, -1):  # Include leaf node
-    #         node = path[i]
-            
-    #         # Update node's own visits
-    #         node.visits += 1
-            
-    #         # If not the leaf node, update move statistics
-    #         if i < len(path) - 1:
-    #             child = path[i + 1]
-    #             move = child.move
-                
-    #             # Revert virtual loss first
-    #             node.revert_virtual_loss(move)
-                
-    #             # Update statistics for this move
-    #             node.N[move] += 1
-    #             node.W[move] += value
-    #             node.Q[move] = node.W[move] / node.N[move]
-                
-    #             print(f"DEBUG: Node {i} - Move: {move}, Visits: {node.visits}, N[move]: {node.N[move]}, W[move]: {node.W[move]}, Q[move]: {node.Q[move]}")
-            
-    #         # Flip value for parent's perspective
-    #         value = -value
+                # print(f"DEBUG: Removed virtual loss for move {move}")

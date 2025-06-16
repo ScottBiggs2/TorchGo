@@ -5,7 +5,7 @@ from IPython.display import display
 
 from boards.board_manager import GoGame
 from models.policy_value_model import PolicyValueNet
-from mcts.monte_carlo_tree_search_nodes import MCTSNode
+from mcts.run_batched_mcts import run_batched_mcts
 from training.self_play_system import state_to_tensor, generate_influence_fields
 # ----------------------------------------------------------------------
 # Part 1: Plotting Helpers
@@ -151,7 +151,7 @@ def play_vs_net(policy_value_net: PolicyValueNet,
     Let a human play against the network. You choose Black or White, then
     loop until game over:
       - On human's turn: prompt for a move ("row column", "pass", or "end game").
-      - On net's turn: run PUCT‐MCTS, show a policy heatmap, then apply argmax move.
+      - On net's turn: run batched MCTS, show a policy heatmap, then apply argmax move.
     At each turn the board is re‐plotted so you can see the current position.
     """
 
@@ -196,12 +196,12 @@ def play_vs_net(policy_value_net: PolicyValueNet,
             # ---- Network's turn ----
 
             # a) Compute raw policy (no MCTS)
-            state_tensor = state_to_tensor(game, device).unsqueeze(0)  # [1,2,19,19]
+            state_tensor = state_to_tensor(game, device).unsqueeze(0)  # [1,6,19,19]
             state_tensor = torch.concat([state_tensor,
-                                            generate_influence_fields(state_tensor, sigma=1),  # Only use current board for influence
-                                            generate_influence_fields(state_tensor, sigma=3),
-                                            generate_influence_fields(state_tensor, sigma=6),
-                                         ], dim = 1)
+                                       generate_influence_fields(state_tensor, sigma=1),
+                                       generate_influence_fields(state_tensor, sigma=3),
+                                       generate_influence_fields(state_tensor, sigma=6)
+                                      ], dim=1)
 
             with torch.no_grad():
                 raw_policy, eval = policy_value_net(state_tensor)  # [1,361], [1,1]
@@ -214,91 +214,43 @@ def play_vs_net(policy_value_net: PolicyValueNet,
                 fig_raw = plot_policy(game, raw_policy)
                 display(fig_raw)
 
-            # c) Now run PUCT‐MCTS internally to pick a move
-            root = MCTSNode(game.clone(), parent=None, move=None)
-            for _ in range(num_playouts):
-                node = root
-                path = [node]
+            # c) Run batched MCTS to pick a move
+            best_move, root = run_batched_mcts(
+                game.clone(),
+                policy_value_net,
+                device,
+                num_playouts,
+                c_puct,
+                temperature=0.0,  # Always use argmax for actual play
+                training=False
+            )
 
-                # Selection
-                while node.P is not None and not node.game.game_over:
-                    mv, node = node.select_child(c_puct)
-                    path.append(node)
-
-                # Expansion & Evaluation
-                if node.game.game_over:
-                    score = node.game.score()
-                    b_score = score['black_score']
-                    w_score = score['white_score']
-                    if b_score > w_score:
-                        value_leaf = +1.0
-                    elif w_score > b_score:
-                        value_leaf = -1.0
-                    else:
-                        value_leaf = 0.0
-                else:
-                    value_leaf = node.expand_and_evaluate(policy_value_net, device)
-
-                # Backpropagation
-                for i in range(len(path) - 1):
-                    parent = path[i]
-                    child = path[i + 1]
-                    mv_taken = child.move
-                    parent.visits += 1
-                    parent.N[mv_taken] += 1
-                    parent.W[mv_taken] += value_leaf
-                    parent.Q[mv_taken] = parent.W[mv_taken] / parent.N[mv_taken]
-                    value_leaf = -value_leaf
-                path[-1].visits += 1
-
-            # Extract the visit‐count distribution π
-            pi_tensor = torch.zeros(NUM_MOVES + 1, device=device)  # +1 for pass
-            for mv, child in root.children.items():
-                if mv is None:
-                    pi_tensor[-1] = root.N[mv]  # Pass move is at the end
-                else:
-                    idx = mv[0] * BOARD_SIZE + mv[1]
-                    pi_tensor[idx] = root.N[mv]
-            if pi_tensor.sum() > 0:
-                pi_tensor /= pi_tensor.sum()
-
-            # Show policy heatmap
-            if displays:
-                print("Network is thinking with MCTS to pick its move...\n")
-                fig2 = plot_policy(game, pi_tensor)
-                display(fig2)
-
-            # Pick argmax move
-            top_idx = torch.argmax(pi_tensor).item()
-            if pi_tensor[top_idx] == 0:
-                net_move = None
-            elif top_idx == NUM_MOVES:  # Pass move
-                net_move = None
-            else:
-                net_move = (top_idx // BOARD_SIZE, top_idx % BOARD_SIZE)
-
-            if net_move is None:
+            # d) Play the selected move
+            if best_move is None:
                 game.play_move()  # pass
-                score = game.score()
-
-                black_scores.append(score['black_score'])
-                white_scores.append(score['white_score'])
-
                 print("Network passed.\n")
-                if displays:
-                    print(f"Scores: Black - {score['black_score']} | White - {score['white_score']}")
-                    print(f"Network win-odds evaluation: {eval} (Black winning: 1, Wite winning: -1)")
-
             else:
-                game.play_move(net_move[0], net_move[1])
-                score = game.score()
-                black_scores.append(score['black_score'])
-                white_scores.append(score['white_score'])
+                game.play_move(best_move[0], best_move[1])
+                print(f"Network played at {best_move}.\n")
 
-                print(f"Network plays at {net_move}.\n")
-                if displays:
-                    print(f"Scores: Black - {score['black_score']} | White - {score['white_score']}")
-                    print(f"Network win-odds evaluation: {eval} (Black winning: 1, Wite winning: -1)")
+            # e) Show MCTS policy if requested
+            if displays:
+                # Convert visit counts to probabilities
+                visit_counts = torch.zeros(NUM_MOVES + 1, dtype=torch.float32, device=device)
+                total_visits = 0
+                for move, child in root.children.items():
+                    if move is None:
+                        visit_counts[-1] = root.N[move]  # Pass move
+                    else:
+                        idx = move[0] * BOARD_SIZE + move[1]
+                        visit_counts[idx] = root.N[move]
+                    total_visits += root.N[move]
+                if total_visits > 0:
+                    visit_counts /= total_visits
+
+                print("Network's turn—showing MCTS policy...\n")
+                fig_mcts = plot_policy(game, visit_counts)
+                display(fig_mcts)
 
     # Game is over: show final board and result
     fig_final = plot_board(game)
@@ -347,5 +299,6 @@ def play_vs_net(policy_value_net: PolicyValueNet,
 
     plt.tight_layout()
     plt.close(fig)
+    
     return fig
 

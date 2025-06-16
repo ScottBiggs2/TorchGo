@@ -44,7 +44,7 @@ def run_batched_mcts(root_game: GoGame,
     
     # Run simulations
     for sim in range(num_playouts):
-        print(f"\nDEBUG: Starting simulation {sim + 1}/{num_playouts}")
+        # print(f"\nDEBUG: Starting simulation {sim + 1}/{num_playouts}")
         node = root
         path = [node]
         
@@ -56,12 +56,12 @@ def run_batched_mcts(root_game: GoGame,
                 outcome = 1.0 if score['black_score'] > score['white_score'] else -1.0
                 if node.game.current_player == node.game.WHITE:
                     outcome = -outcome
-                print(f"DEBUG: Terminal node reached with outcome {outcome}")
+                # print(f"DEBUG: Terminal node reached with outcome {outcome}")
                 batched_mcts._backpropagate(path, outcome)
                 break
                 
             if node.P is None:
-                print(f"DEBUG: Node needs expansion, adding to batch queue")
+                # print(f"DEBUG: Node needs expansion, adding to batch queue")
                 batched_mcts.add_to_queue(node, path)
                 # Only process batch if it's full or this is the last simulation
                 if len(batched_mcts.queue) >= batched_mcts.batch_size or sim == num_playouts - 1:
@@ -92,33 +92,33 @@ def run_batched_mcts(root_game: GoGame,
                 outcome = 1.0 if score['black_score'] > score['white_score'] else -1.0
                 if node.game.current_player == node.game.WHITE:
                     outcome = -outcome
-                print(f"DEBUG: All children terminal, outcome {outcome}")
+                # print(f"DEBUG: All children terminal, outcome {outcome}")
                 batched_mcts._backpropagate(path, outcome)
                 break
                 
             move, child = node.select_child(batched_mcts.c_puct)
-            print(f"DEBUG: Selected move {move} with UCB score {child.Q.get(move, 0)}")
+            # print(f"DEBUG: Selected move {move} with UCB score {child.Q.get(move, 0)}")
             path.append(child)
             node = child
     
     # Process any remaining in the batch queue
-    print("\nDEBUG: Processing final batch")
+    # print("\nDEBUG: Processing final batch")
     batched_mcts.process_batch()
     
     # Select move based on visit counts
     if not root.P:
-        print("DEBUG: No legal moves (root.P is empty)")
+        # print("DEBUG: No legal moves (root.P is empty)")
         return None, root  # No legal moves
     
     visit_counts = {move: root.N[move] for move in root.P}
     total_visits = sum(visit_counts.values())
-    print(f"DEBUG: Total visits: {total_visits}")
-    print(f"DEBUG: Visit counts: {visit_counts}")
+    # print(f"DEBUG: Total visits: {total_visits}")
+    # print(f"DEBUG: Visit counts: {visit_counts}")
     
     if temperature < 0.01 or not training:
         # Greedy selection
         best_move = max(visit_counts, key=visit_counts.get)
-        print(f"DEBUG: Greedy selection chose move {best_move} with {visit_counts[best_move]} visits")
+        # print(f"DEBUG: Greedy selection chose move {best_move} with {visit_counts[best_move]} visits")
     else:
         # Ensure minimum visit count to avoid zero weights
         min_visits = 1
@@ -130,8 +130,8 @@ def run_batched_mcts(root_game: GoGame,
             for move, count in visit_counts.items()
         }
         total_scaled = sum(scaled_visits.values())
-        print(f"DEBUG: Total scaled visits: {total_scaled}")
-        print(f"DEBUG: Scaled visits: {scaled_visits}")
+        # print(f"DEBUG: Total scaled visits: {total_scaled}")
+        # print(f"DEBUG: Scaled visits: {scaled_visits}")
         
         # Calculate probabilities with minimum weight
         min_weight = 1e-8
@@ -141,12 +141,12 @@ def run_batched_mcts(root_game: GoGame,
         total_prob = sum(probs.values())
         probs = {move: prob / total_prob for move, prob in probs.items()}
         
-        print(f"DEBUG: Final probabilities: {probs}")
-        print(f"DEBUG: Sum of probabilities: {sum(probs.values())}")
+        # print(f"DEBUG: Final probabilities: {probs}")
+        # print(f"DEBUG: Sum of probabilities: {sum(probs.values())}")
         
         # Sample from probability distribution
         moves, weights = zip(*probs.items())
         best_move = random.choices(moves, weights=weights, k=1)[0]
-        print(f"DEBUG: Sampled move {best_move} with probability {probs[best_move]}")
+        # print(f"DEBUG: Sampled move {best_move} with probability {probs[best_move]}")
     
     return best_move, root

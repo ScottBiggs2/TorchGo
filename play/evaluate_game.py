@@ -5,7 +5,7 @@ from IPython.display import display
 
 from boards.board_manager import GoGame
 from models.policy_value_model import PolicyValueNet
-from mcts.monte_carlo_tree_search_nodes import MCTSNode
+from mcts.run_batched_mcts import run_batched_mcts
 from training.self_play_system import state_to_tensor, generate_influence_fields
 from play.human_vs_model import plot_board, plot_policy, get_user_move
 
@@ -32,108 +32,106 @@ def review_game(
     NUM_MOVES = BOARD_SIZE * BOARD_SIZE
     print("Enter moves to review. Format: 'row col' (0-based). Type 'pass' to pass, 'done' to end review.")
 
-    while True:
-        # Display current board
+
+    while not game.game_over:
+        # Plot current board
         fig = plot_board(game)
         display(fig)
 
-        # Get network evaluation at current position
-        state_tensor = state_to_tensor(game, device).unsqueeze(0)  # [1,2,BOARD_SIZE,BOARD_SIZE]
-        state_tensor = torch.concat( [state_tensor,
-                                      generatue_influence_fields(state_tensor, sigma = 1),
-                                      generate_influence_fields(state_tensor, sigma = 3),
-                                      generate_influence_fields(state_tensor, sigma = 6)], dim = 1 )
+        # Get user's move
+        user_move = get_user_move(game)
+        if user_move is None:
+            game.play_move()  # pass
+            print("You passed.\n")
+        elif user_move is True:
+            game.game_over = True
+            print(f"You ended the game.")
+        else:
+            game.play_move(user_move[0], user_move[1])
+            print(f"You played at {user_move}.\n")
+
+        # Get network's evaluation
+        state_tensor = state_to_tensor(game, device).unsqueeze(0)  # [1,6,19,19]
+        state_tensor = torch.concat([state_tensor,
+                                   generate_influence_fields(state_tensor, sigma=1),
+                                   generate_influence_fields(state_tensor, sigma=3),
+                                   generate_influence_fields(state_tensor, sigma=6)
+                                  ], dim=1)
 
         with torch.no_grad():
-            raw_policy, value = policy_value_net(state_tensor)
-        raw_policy = raw_policy.squeeze(0)  # [NUM_MOVES]
+            policy, value = policy_value_net(state_tensor)
+            raw_policy = policy.squeeze(0)  # [NUM_MOVES]
+            value = float(value.item())
 
         print("Network showing raw policy prior...\n")
         fig_raw = plot_policy(game, raw_policy)
         display(fig_raw)
-        value = float(value.item())  # scalar in [-1,1]
+        
+        # Run batched MCTS to get move suggestions
+        best_move, root = run_batched_mcts(
+            game.clone(),
+            policy_value_net,
+            device,
+            num_playouts=100,  # Use fewer playouts for review mode
+            c_puct=5.0,
+            temperature=1.0,  # Use temperature=1 for review mode to show more variety
+            training=False
+        )
 
-        # Show network's top-3 suggestions
-        probs = raw_policy.cpu().numpy()
-        # Zero out illegal moves
-        legal_mask = np.zeros(NUM_MOVES, dtype=bool)
-        for idx in range(NUM_MOVES):
-            x, y = divmod(idx, BOARD_SIZE)
-            if game.is_legal(x, y):
-                legal_mask[idx] = True
-        probs_masked = probs * legal_mask
-        if probs_masked.sum() > 0:
-            probs_norm = probs_masked / probs_masked.sum()
-        else:
-            probs_norm = legal_mask.astype(float) / legal_mask.sum()
-        top_indices = probs_norm.argsort()[-top_k:][::-1]
-        suggestions = [(idx // BOARD_SIZE, idx % BOARD_SIZE, probs_norm[idx]) for idx in top_indices]
+        # Convert visit counts to probabilities
+        visit_counts = torch.zeros(game.BOARD_SIZE * game.BOARD_SIZE + 1, dtype=torch.float32, device=device)
+        total_visits = 0
+        for move, child in root.children.items():
+            if move is None:
+                visit_counts[-1] = root.N[move]  # Pass move
+            else:
+                idx = move[0] * game.BOARD_SIZE + move[1]
+                visit_counts[idx] = root.N[move]
+            total_visits += root.N[move]
+        if total_visits > 0:
+            visit_counts /= total_visits
 
-        print(f"Evaluation (value ∈ [-1,+1], +1=Black wins, -1=White wins): {value:.3f}")
-        print(f"Top-{top_k} suggestions (row, col, probability):")
-        for (rx, ry, p) in suggestions:
-            print(f"  → ({rx}, {ry}): {p:.3f}")
+        # Show policy heatmap
+        fig_policy = plot_policy(game, visit_counts)
+        display(fig_policy)
 
-        # Record history
-        move_history.append(game.clone())  # store a snapshot
+        # Show top-k suggested moves
+        if total_visits > 0:
+            print("\nTop suggested moves:")
+            sorted_moves = sorted(root.children.items(), key=lambda x: root.N[x[0]], reverse=True)
+            for i, (move, child) in enumerate(sorted_moves[:top_k]):
+                if move is None:
+                    print(f"{i+1}. Pass (visits: {root.N[move]})")
+                else:
+                    print(f"{i+1}. {move} (visits: {root.N[move]})")
+
+        # Record evaluation and territory
         value_history.append(value)
-        terr = game.estimate_territory()
-        territory_history.append((terr['black_territory'], terr['white_territory']))
+        territory = game.estimate_territory()
+        territory_history.append((territory['black_territory'], territory['white_territory']))
 
-        # Prompt user for next move
-        move_str = input("Next move ('row col', 'pass', or 'done'): ").strip().lower()
-        if move_str == 'done':
-            break
-        if move_str == 'pass':
-            game.play_move()
-            continue
-        parts = move_str.split()
-        if len(parts) != 2:
-            print("Invalid input format. Please try again.")
-            continue
-        try:
-            x, y = int(parts[0]), int(parts[1])
-        except ValueError:
-            print("Invalid numbers. Please try again.")
-            continue
-        if not (0 <= x < BOARD_SIZE and 0 <= y < BOARD_SIZE):
-            print(f"Coordinates must be between 0 and {BOARD_SIZE-1}.")
-            continue
-        if not game.is_legal(x, y):
-            print(f"Move ({x}, {y}) is illegal. Try again.")
-            continue
-        game.play_move(x, y)
+        # Show current evaluation
+        print(f"Evaluation (value ∈ [-1,+1], +1=Black wins, -1=White wins): {value:.3f}")
+    
+        print(f"\nNetwork evaluation: {value:.3f} (Black winning: 1, White winning: -1)")
+        print(f"Current territory - Black: {territory['black_territory']}, White: {territory['white_territory']}\n")
 
-    # Game is over: show final board and result
+    # Game is over: show final board
     fig_final = plot_board(game)
     display(fig_final)
 
-    terr = game.estimate_territory()
-    b_ter = terr['black_territory']
-    w_ter = terr['white_territory']
-    print(f"Final score → Black: {b_ter}, White: {w_ter}")
-    if b_ter > w_ter:
-        print("Black wins!")
-        if human_plays_black:
-            print("You win!")
-        else:
-            print("Opponent wins!")
-    elif w_ter > b_ter:
-        print("White wins!")
-        if not human_plays_black:
-            print("You win!")
-        else:
-            print("Opponent wins!")
-    else:
-        print("It's a tie!")
+    # Show final score
+    final_scores = game.score()
+    print(f"Final score → Black: {final_scores['black_score']}, White: {final_scores['white_score']}")
 
     if return_moves:
-        print(f"Move recording: \n")
-        game.print_move_log
+        print(f"\nMove recording:")
+        game.print_move_log()
 
-    # After review ends, plot evaluation and territory over move number
+    # Plot evaluation and score over move number
     moves = list(range(len(value_history)))
-    black_ter, white_ter = zip(*territory_history)
+    black_scores = [t[0] for t in value_history]
+    white_scores = [t[1] for t in value_history]
 
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 10))
     ax1.plot(moves, value_history, marker='o')
@@ -142,15 +140,17 @@ def review_game(
     ax1.set_ylabel("Value (–1 to +1)")
     ax1.grid(True)
 
-    ax2.plot(moves, black_ter, label="Black Territory")
-    ax2.plot(moves, white_ter, label="White Territory")
-    ax2.set_title("Estimated Territory over Moves")
+    ax2.plot(moves, black_scores, label="Black Score")
+    ax2.plot(moves, white_scores, label="White Score")
+    ax2.set_title("Score over Moves")
     ax2.set_xlabel("Move Number")
-    ax2.set_ylabel("Territory Count")
+    ax2.set_ylabel("Score Count")
     ax2.legend()
     ax2.grid(True)
 
     plt.tight_layout()
+    display(fig)
     plt.close(fig)
-    return fig
+
+    return game
 
