@@ -258,7 +258,7 @@ def play_vs_net(policy_value_net: PolicyValueNet,
         white_scores.append(score['white_score'])
 
         if displays:
-            print(f"Evaluation (value ∈ [-1,+1], +1=Black wins, -1=White wins): {eval:.3f}")
+            print(f"Evaluation (value ∈ [-1,+1], +1=Black wins, -1=White wins): {float(eval.item()):.3f}")
             print(f"Current territory - Black: {score['black_score']}, White: {score['white_score']}\n")
 
     # Game is over: show final board and result
