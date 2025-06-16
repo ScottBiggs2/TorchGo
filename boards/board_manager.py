@@ -1,38 +1,37 @@
 import torch
 from typing import Optional, Tuple, List
 
-# The same everywhere
-# BOARD_SIZE = 19
-# EMPTY = 0
-# BLACK = -1
-# WHITE = 1
-
-# def opponent(player: int) -> int:
-#     return BLACK if player == WHITE else WHITE
-#
-# def is_on_board(x: int, y: int) -> bool:
-#     return 0 <= x < BOARD_SIZE and 0 <= y < BOARD_SIZE
-#
-# def get_neighbors(x: int, y: int) -> List[Tuple[int,int]]:
-#     directions = [(-1, 0), (1, 0), (0, -1), (0, 1)]
-#     return [(x+dx, y+dy) for dx, dy in directions if is_on_board(x+dx, y+dy)]
-
 class GoGame:
     def __init__(self, BOARD_SIZE):
-        self.BOARD_SIZE = BOARD_SIZE
-        self.EMPTY = 0
+
         self.BLACK = -1
         self.WHITE = 1
-        self.komi = 7.5
-
-        self.board = torch.zeros((BOARD_SIZE, BOARD_SIZE), dtype=torch.int8)
+        self.EMPTY = 0
+        self.BOARD_SIZE = BOARD_SIZE
+        self.komi = 6.5
+        self.current_player = self.BLACK
+        
+        self.board = torch.zeros((self.BOARD_SIZE, self.BOARD_SIZE), dtype=torch.int8)
         self.history: List[torch.Tensor] = []
         self.move_log: List[Tuple[int, Optional[int], Optional[int]]] = []
-        self.current_player = self.BLACK
         self.pass_count = 0
         self.game_over = False
+
         self.last_move: Optional[Tuple[int,int]] = None
         self.captures = {self.BLACK: 0, self.WHITE: 0}
+        
+        self.history = []
+        self.move_log = []
+        self.last_move = None
+        self.pass_count = 0
+        
+        # Add move cycle detection
+        self.move_cycle = []  # Store last few moves
+        self.cycle_threshold = 5  # Number of repeats before ending game
+        self.cycle_length = 2  # Length of cycle to detect (e.g., 2 for alternating moves)
+
+    def copy_board(self) -> torch.Tensor:
+        return self.board.clone()
 
     def opponent(self, player: int) -> int:
         return self.BLACK if player == self.WHITE else self.WHITE
@@ -43,9 +42,6 @@ class GoGame:
     def get_neighbors(self, x: int, y: int) -> List[Tuple[int, int]]:
         directions = [(-1, 0), (1, 0), (0, -1), (0, 1)]
         return [(x + dx, y + dy) for dx, dy in directions if self.is_on_board(x + dx, y + dy)]
-
-    def copy_board(self) -> torch.Tensor:
-        return self.board.clone()
 
     def _flood_fill_group(
         self,
@@ -163,7 +159,7 @@ class GoGame:
         Returns False if:
           - (x,y) is off‐board or not empty
           - move is suicide on temp_board
-          - move violates Ko (i.e. temp_board after one move exactly equals history[-1])
+          - move violates Ko (i.e. makes board identical to same player's last move)
         Otherwise True.
         """
         # 1) Off-board or occupied?
@@ -176,22 +172,32 @@ class GoGame:
         if self.is_suicide(x, y, self.current_player):
             return False
 
-        # 3) Ko check: simulate one move on a backup board and see if it repeats history[-1]
-        backup = self.copy_board()
-        backup[x, y] = self.current_player
-
-        # Remove any captures on backup
-        visited = set()
-        for nx, ny in self.get_neighbors(x, y):
-            if backup[nx, ny].item() == self.opponent(self.current_player) and (nx, ny) not in visited:
-                group = self._flood_fill_group(nx, ny, backup, visited)
-                if self._count_liberties(group, backup) == 0:
-                    for gx, gy in group:
-                        backup[gx, gy] = self.EMPTY
-
-        # If after this simulated move the board equals the previous position, forbid it
-        if self.history and torch.equal(backup, self.history[-1]):
-            return False
+        # 3) Ko check: check if this move would make the board identical to same player's last move
+        if len(self.history) >= 2:
+            # Find the last move by the same player
+            same_player_last_move = None
+            for i in range(len(self.history) - 1, -1, -1):
+                if i % 2 == (len(self.history) - 1) % 2:  # Same player's turn
+                    same_player_last_move = i
+                    break
+            
+            if same_player_last_move is not None:
+                # Simulate the current move
+                backup = self.copy_board()
+                backup[x, y] = self.current_player
+                
+                # Remove any captures
+                visited = set()
+                for nx, ny in self.get_neighbors(x, y):
+                    if backup[nx, ny].item() == self.opponent(self.current_player) and (nx, ny) not in visited:
+                        group = self._flood_fill_group(nx, ny, backup, visited)
+                        if self._count_liberties(group, backup) == 0:
+                            for gx, gy in group:
+                                backup[gx, gy] = self.EMPTY
+                
+                # Check if the resulting board matches the same player's last move
+                if torch.equal(backup, self.history[same_player_last_move]):
+                    return False
 
         return True
 
@@ -225,11 +231,7 @@ class GoGame:
         self.last_move = (x, y)
 
         # Remove dead opponent stones and count captures
-        prev_captures = self.captures[self.current_player]
         self.remove_dead_stones(self.current_player)
-        new_captures = self.captures[self.current_player]
-        # if new_captures > prev_captures:
-            # print(f"{'Black' if self.current_player == self.BLACK else 'White'} captured {new_captures - prev_captures} stones")
 
         # Append to history for Ko
         self.history.append(self.copy_board())
@@ -237,91 +239,335 @@ class GoGame:
         # Log the move
         self.move_log.append((self.current_player, x, y))
         self.pass_count = 0
+        
+        # Check for move cycles
+        self.move_cycle.append((x, y))
+        if len(self.move_cycle) >= self.cycle_length * self.cycle_threshold:
+            # Check if we have a repeating pattern
+            is_cycle = True
+            for i in range(self.cycle_length):
+                for j in range(self.cycle_threshold):
+                    if self.move_cycle[-self.cycle_length * (j+1) + i] != self.move_cycle[-self.cycle_length + i]:
+                        is_cycle = False
+                        break
+                if not is_cycle:
+                    break
+            
+            if is_cycle:
+                print(f"DEBUG: Detected move cycle after {len(self.move_cycle)} moves. Ending game.")
+                self.game_over = True
+            
+            # Keep only the last cycle_length * cycle_threshold moves
+            self.move_cycle = self.move_cycle[-self.cycle_length * self.cycle_threshold:]
+        
         self.current_player = self.opponent(self.current_player)
         return True
 
     def estimate_territory(self) -> dict:
-        """
-        Implements area scoring rules:
-        1. Count all intersections enclosed by your stones (including empty points)
-        2. Add captured stones
-        3. Count empty points in moyo (large open areas) if bounded by your stones
-        4. Count empty points inside opponent's isolated groups (if they don't form their own territory)
-        
-        Returns {'black_territory': int, 'white_territory': int}.
-        """
         visited = set()
         territory = {self.BLACK: 0, self.WHITE: 0}
         
-        def flood_fill_territory(x: int, y: int, owner: int) -> Tuple[set, set, bool]:
-            """
-            Flood fill from (x,y) to find all connected empty points and their borders.
-            Returns (empty_points, border_stones, has_opponent_wall)
-            """
-            empty_points = set()
-            border_stones = set()
-            has_opponent_wall = False
-            stack = [(x, y)]
-            
-            while stack:
-                cx, cy = stack.pop()
-                if (cx, cy) in visited:
-                    continue
-                    
-                val = self.board[cx, cy].item()
-                if val == self.EMPTY:
-                    visited.add((cx, cy))
-                    empty_points.add((cx, cy))
-                    
-                    # Check neighbors
-                    for nx, ny in self.get_neighbors(cx, cy):
-                        if (nx, ny) not in visited:
-                            nval = self.board[nx, ny].item()
-                            if nval == self.EMPTY:
-                                stack.append((nx, ny))
-                            else:
-                                border_stones.add((nx, ny))
-                                if nval == self.opponent(owner):
-                                    has_opponent_wall = True
-                elif val == owner:
-                    border_stones.add((cx, cy))
-                elif val == self.opponent(owner):
-                    has_opponent_wall = True
-                    
-            return empty_points, border_stones, has_opponent_wall
-
-        # First pass: identify all empty regions and their borders
-        empty_regions = []
         for i in range(self.BOARD_SIZE):
             for j in range(self.BOARD_SIZE):
-                if (i, j) not in visited and self.board[i, j].item() == self.EMPTY:
-                    # Try both colors as potential owners
-                    for owner in [self.BLACK, self.WHITE]:
-                        empty_points, border_stones, has_opponent_wall = flood_fill_territory(i, j, owner)
-                        if empty_points:  # If we found a new region
-                            empty_regions.append((empty_points, border_stones, has_opponent_wall, owner))
-                            break  # Only need to check one color per empty point
-
-        # Second pass: score each region
-        for empty_points, border_stones, has_opponent_wall, owner in empty_regions:
-            # Count stones of each color in the border
-            border_counts = {self.BLACK: 0, self.WHITE: 0}
-            for x, y in border_stones:
-                border_counts[self.board[x, y].item()] += 1
-                
-            # Determine territory ownership
-            if not has_opponent_wall:  # No opponent stones touching the region
-                territory[owner] += len(empty_points)
-            # elif border_counts[owner] > border_counts[self.opponent(owner)]:
-            #     # Your stones form a stronger wall around the region
-            #     territory[owner] += len(empty_points)
-            # elif border_counts[owner] == border_counts[self.opponent(owner)]:
-            #     # Equal influence - split the territory
-            #     territory[owner] += len(empty_points) // 2
-            #     territory[self.opponent(owner)] += len(empty_points) // 2
-
+                if self.board[i, j].item() == self.EMPTY and (i, j) not in visited:
+                    region = set()
+                    stack = [(i, j)]
+                    borders = set()
+                    has_black = False
+                    has_white = False
+                    
+                    while stack:
+                        x, y = stack.pop()
+                        if (x, y) in visited:
+                            continue
+                        visited.add((x, y))
+                        region.add((x, y))
+                        
+                        # Get neighbors with bounds checking
+                        for nx, ny in self.get_neighbors(x, y):
+                            # Skip off-board points
+                            if not (0 <= nx < self.BOARD_SIZE and 0 <= ny < self.BOARD_SIZE):
+                                continue
+                                
+                            val = self.board[nx, ny].item()
+                            if val == self.EMPTY:
+                                if (nx, ny) not in visited:
+                                    stack.append((nx, ny))
+                            else:
+                                if val == self.BLACK:
+                                    has_black = True
+                                elif val == self.WHITE:
+                                    has_white = True
+                    
+                    # Determine territory ownership
+                    if has_black and not has_white:
+                        territory[self.BLACK] += len(region)
+                    elif has_white and not has_black:
+                        territory[self.WHITE] += len(region)
+        
         return {'black_territory': territory[self.BLACK],
                 'white_territory': territory[self.WHITE]}
+
+    def run_tests(self):
+        print("\n===== Running Advanced Go Scoring Tests =====")
+        passed = 0
+        total = 0
+    
+        # Test 1: Empty board
+        total += 1
+        game = GoGame(9)
+        terr = game.estimate_territory()
+        print("\nTest 1: Empty board")
+        game.print_board()
+        if terr['black_territory'] == 0 and terr['white_territory'] == 0:
+            print("✅ Test 1: Empty board passed")
+            passed += 1
+        else:
+            print("❌ Test 1: Empty board failed")
+    
+        # Test 2: Fully enclosed territory
+        total += 1
+        game = GoGame(5)
+        # Create black border around board
+        for i in range(5):
+            game.board[0, i] = game.BLACK
+            game.board[4, i] = game.BLACK
+            if 0 < i < 4:
+                game.board[i, 0] = game.BLACK
+                game.board[i, 4] = game.BLACK
+        print("\nTest 2: Fully enclosed territory")
+        game.print_board()
+        terr = game.estimate_territory()
+        if terr['black_territory'] == 9 and terr['white_territory'] == 0:
+            print("✅ Test 2: Fully enclosed territory passed")
+            passed += 1
+        else:
+            print(f"❌ Test 2: Fully enclosed failed (got {terr})")
+    
+        # Test 3: Corner enclosure
+        total += 1
+        game = GoGame(5)
+        # Black corner enclosure
+        # game.board[0, 0] = game.BLACK
+        game.board[0, 1] = game.BLACK
+        game.board[1, 0] = game.BLACK
+        game.board[1, 1] = game.BLACK
+        game.board[4, 1] = game.WHITE
+        print("\nTest 3: Corner enclosure")
+        game.print_board()
+        terr = game.estimate_territory()
+        if terr['black_territory'] == 1 and terr['white_territory'] == 0:
+            print("✅ Test 3: Corner enclosure passed")
+            passed += 1
+        else:
+            print(f"❌ Test 3: Corner enclosure failed (got {terr})")
+    
+        # Test 4: Diagonal boundary (should be neutral)
+        total += 1
+        game = GoGame(5)
+        # Create diagonal boundary
+        game.board[0, 0] = game.BLACK
+        game.board[0, 2] = game.BLACK
+        game.board[0, 4] = game.BLACK
+        game.board[2, 0] = game.BLACK
+        game.board[2, 2] = game.BLACK
+        game.board[2, 4] = game.BLACK
+        game.board[4, 0] = game.BLACK
+        game.board[4, 2] = game.BLACK
+        game.board[4, 4] = game.BLACK
+        
+        game.board[1, 1] = game.WHITE
+        game.board[1, 3] = game.WHITE
+        game.board[3, 1] = game.WHITE
+        game.board[3, 3] = game.WHITE
+        print("\nTest 4: Diagonal boundary")
+        game.print_board()
+        terr = game.estimate_territory()
+        if terr['black_territory'] == 0 and terr['white_territory'] == 0:
+            print("✅ Test 4: Diagonal boundary passed")
+            passed += 1
+        else:
+            print(f"❌ Test 4: Diagonal boundary failed (got {terr})")
+    
+        # Test 5: Complex capture sequence
+        total += 1
+        game = GoGame(5)
+        # Create capture ladder
+        moves = [
+            (0, 0), (1, 0),
+            (0, 1), (1, 1),
+            (3, 3), (0, 2)
+        ]
+        
+        # . . W .
+        # W W . .
+        # . . . .
+        # . . . B
+        # . . . .
+        
+        for i, (x, y) in enumerate(moves):
+            player = game.current_player
+            success = game.play_move(x, y)
+            if not success:
+                print(f"Move {i+1} at ({x},{y}) by {'B' if player == game.BLACK else 'W'} failed!")
+                
+        print("\nTest 5: Complex capture sequence")
+        game.print_board()
+        
+        print(f"Captures - Black: {game.captures[game.BLACK]}, White: {game.captures[game.WHITE]}")
+        terr = game.estimate_territory()
+        score = game.score()
+        
+        # Expect white to capture at least 1 stone
+        if game.captures[game.WHITE] >= 1:
+            print("✅ Test 5: Capture sequence passed")
+            print(f"Scores - Black {score['black_score']}, White {score['white_score']}")
+            passed += 1
+        else:
+            print(f"❌ Test 5: Capture sequence failed (white captures: {game.captures[game.WHITE]})")
+            print(f"Scores - Black {score['black_score']}, White {score['white_score']}")
+
+    
+        # Test 6: Seki (mutual life) position
+        total += 1
+        """
+        Create seki position:
+          B B B . .
+          B W B . .
+          B B B . .
+          . . . . .
+          . . . . .
+        But with eyes:
+          B B B . .
+          B . W . .
+          B W B . .
+          . . . . .
+          . . . . .
+        Actually create:
+          Positions where both groups are alive without two eyes
+        """
+        # Better seki position
+        game = GoGame(5)
+        # Create:
+        #   . B W .
+        #   B . W B
+        #   W W . W
+        #   . B W .
+        game.board[0, 1] = game.BLACK
+        game.board[0, 2] = game.WHITE
+        game.board[1, 0] = game.BLACK
+        game.board[1, 2] = game.WHITE
+        game.board[1, 3] = game.BLACK
+        game.board[2, 0] = game.WHITE
+        game.board[2, 1] = game.WHITE
+        game.board[2, 3] = game.WHITE
+        game.board[3, 1] = game.BLACK
+        game.board[3, 2] = game.WHITE
+
+        print("\nTest 6: Seki position")
+        game.print_board()
+        terr = game.estimate_territory()
+        # Center points should be neutral
+        if terr['black_territory'] == 1 and terr['white_territory'] == 1:
+            print("✅ Test 6: Seki position passed")
+            passed += 1
+        else:
+            print(f"❌ Test 6: Seki position failed (got {terr})")
+    
+        # Test 7: Double enclosure
+        total += 1
+        game = GoGame(5)
+        # Create two separate enclosures
+        # Black top-left, white bottom-right
+        for i in range(3):
+            for j in range(3):
+                if i == 0 or j == 0:
+                    game.board[i, j] = game.BLACK
+                if i == 4 or j == 4:
+                    game.board[i, j] = game.WHITE
+        game.board[0, 4] = game.EMPTY  # Don't connect
+        game.board[4, 0] = game.EMPTY  # Don't connect
+        
+        # Add stones to define territories
+        game.board[0, 3] = game.BLACK
+        game.board[1, 4] = game.WHITE
+        game.board[3, 0] = game.BLACK
+        game.board[4, 1] = game.WHITE
+        
+        print("\nTest 7: Double enclosure")
+        game.print_board()
+        terr = game.estimate_territory()
+        # Expect black territory in top-left, white in bottom-right
+        if terr['black_territory'] == 0 and terr['white_territory'] == 0:
+            print("✅ Test 7: Double enclosure passed")
+            passed += 1
+        else:
+            print(f"❌ Test 7: Double enclosure failed (got {terr})")
+    
+        # Test 8: Captured stone in territory
+        total += 1
+        game = GoGame(5)
+        # Black surrounds white stone
+        moves = [
+            (1, 1), (0, 0),  # B, W
+            (0, 1), (1, 0),  # B, W
+            (0, 2), (2, 0),  # B, W
+            (1, 2), (0, 3),  # B, W
+            (2, 1), (3, 0),  # B, W
+            (2, 2), (1, 3),  # B, W
+            (3, 1), (2, 3),  # B, W
+            (3, 2),          # B (captures white)
+        ]
+        for x, y in moves:
+            game.play_move(x, y)
+        print("\nTest 8: Captured stone in territory")
+        game.print_board()
+        terr = game.estimate_territory()
+        score = game.score()
+        # Captured stone should count as territory
+        if terr['black_territory'] >= 1 and game.captures[game.BLACK] >= 1:
+            print("✅ Test 8: Captured stone passed")
+            passed += 1
+        else:
+            print(f"❌ Test 8: Captured stone failed (terr: {terr}, captures: {game.captures})")
+
+        
+        # test 9, a diagonal boundary not in a corner
+        total += 1
+        game = GoGame(5)
+        
+        game.board[0, 0] = game.BLACK
+        game.board[0, 1] = game.WHITE
+        
+        game.board[1, 1] = game.BLACK
+        game.board[1, 2] = game.WHITE
+        
+        game.board[2, 2] = game.BLACK
+        game.board[2, 3] = game.WHITE
+        
+        game.board[3, 3] = game.BLACK
+        game.board[3, 4] = game.WHITE
+        
+        game.board[4, 4] = game.BLACK
+
+        
+        print("\nTest 9: Diagonal territory")
+        game.print_board()
+        terr = game.estimate_territory()
+        score = game.score()
+        # Captured stone should count as territory
+        if terr['black_territory'] == 10 and terr['white_territory'] == 6:
+            print("✅ Test 9: Diagonal wall passed")
+            passed += 1
+        else:
+            print(f"❌ Test 9: Diagonal wall failed (terr: {terr}, captures: {game.captures})")
+    
+        print(f"\nTests passed: {passed}/{total}")
+        if passed == total:
+            print("🎉 All tests passed successfully!")
+        else:
+            print("⚠️ Some tests failed, check implementation")
+    
 
     def score(self) -> dict:
         """

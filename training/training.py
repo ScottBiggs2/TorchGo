@@ -13,7 +13,9 @@ from typing import Tuple, List, Optional
 
 from boards.board_manager import GoGame
 from models.policy_value_model import PolicyValueNet
-from mcts.monte_carlo_tree_search_nodes import MCTSNode
+# from mcts.monte_carlo_tree_search_nodes import MCTSNode
+from mcts.run_batched_mcts import run_batched_mcts
+from mcts.batch_mcts_node import generate_influence_fields, MCTSNode
 from training.self_play_system import ReplayBuffer, play_self_play_game
 
 Example = Tuple[torch.Tensor, torch.Tensor, torch.Tensor]

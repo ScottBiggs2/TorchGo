@@ -7,42 +7,45 @@ from collections import deque
 
 from boards.board_manager import GoGame
 from models.policy_value_model import PolicyValueNet
-from mcts.monte_carlo_tree_search_nodes import MCTSNode
+# from mcts.monte_carlo_tree_search_nodes import MCTSNode
+from mcts.run_batched_mcts import run_batched_mcts
+from mcts.batch_mcts_node import MCTSNode
+from mcts.batch_mcts_node import generate_influence_fields
 
-def generate_influence_fields(stone_tensor: torch.Tensor, sigma: float = 1) -> torch.Tensor:
-    """
-    Input:  stone_tensor of shape (bs, 4, 19, 19)
-           - channels 0,1: current board (black, white)
-           - channels 2,3: previous board (black, white)
-    Output: influence_tensor of shape (bs, 4, 19, 19)
-           - channels 0,1: influence fields for current board
-           - channels 2,3: influence fields for previous board
-    """
-    bs, ch, h, w = stone_tensor.shape
-    assert ch == 4, "Expected 4 input channels (current black/white, previous black/white)"
+# def generate_influence_fields(stone_tensor: torch.Tensor, sigma: float = 1) -> torch.Tensor:
+#     """
+#     Input:  stone_tensor of shape (bs, 4, 19, 19)
+#            - channels 0,1: current board (black, white)
+#            - channels 2,3: previous board (black, white)
+#     Output: influence_tensor of shape (bs, 4, 19, 19)
+#            - channels 0,1: influence fields for current board
+#            - channels 2,3: influence fields for previous board
+#     """
+#     bs, ch, h, w = stone_tensor.shape
+#     assert ch == 4, "Expected 4 input channels (current black/white, previous black/white)"
 
-    # Build 2D Gaussian kernel
-    kernel_size = int(6 * sigma) | 1  # make it odd
-    coords = torch.arange(kernel_size) - kernel_size // 2
-    x_grid, y_grid = torch.meshgrid(coords, coords, indexing="ij")
-    gaussian_kernel = torch.exp(-(x_grid**2 + y_grid**2) / (2 * sigma**2))
-    gaussian_kernel /= gaussian_kernel.sum()  # Normalize
-    kernel = gaussian_kernel.unsqueeze(0).unsqueeze(0)  # shape (1,1,K,K)
+#     # Build 2D Gaussian kernel
+#     kernel_size = int(6 * sigma) | 1  # make it odd
+#     coords = torch.arange(kernel_size) - kernel_size // 2
+#     x_grid, y_grid = torch.meshgrid(coords, coords, indexing="ij")
+#     gaussian_kernel = torch.exp(-(x_grid**2 + y_grid**2) / (2 * sigma**2))
+#     gaussian_kernel /= gaussian_kernel.sum()  # Normalize
+#     kernel = gaussian_kernel.unsqueeze(0).unsqueeze(0)  # shape (1,1,K,K)
 
-    # Prepare to convolve each color channel independently
-    kernel = kernel.to(stone_tensor.device)
-    influence = torch.zeros_like(stone_tensor)
+#     # Prepare to convolve each color channel independently
+#     kernel = kernel.to(stone_tensor.device)
+#     influence = torch.zeros_like(stone_tensor)
 
-    for i in range(ch):  # current black, current white, previous black, previous white
-        influence[:, i:i+1] = F.conv2d(
-            stone_tensor[:, i:i+1],  # shape (bs,1,19,19)
-            kernel, padding=kernel_size // 2
-        )
+#     for i in range(ch):  # current black, current white, previous black, previous white
+#         influence[:, i:i+1] = F.conv2d(
+#             stone_tensor[:, i:i+1],  # shape (bs,1,19,19)
+#             kernel, padding=kernel_size // 2
+#         )
 
-    return influence
+#     return influence
 
 # Each example: (state_tensor, mcts_policy, z_value)
-#   - state_tensor: torch.FloatTensor, shape [2,19,19]
+#   - state_tensor: torch.FloatTensor, shape [16,19,19] (4 base + 12 influence channels)
 #   - mcts_policy:  torch.FloatTensor, shape [361] (visit‐count distribution)
 #   - z_value:      torch.FloatTensor, shape [1] (±1)
 Example = Tuple[torch.Tensor, torch.Tensor, torch.Tensor]
@@ -69,17 +72,24 @@ class ReplayBuffer:
 # Return to this later to give PolicyValueNet the game at time t (present) and time t-1 for Ko rules
 def state_to_tensor(game: GoGame, device: torch.device) -> torch.Tensor:
     """
-    Convert the current and previous positions into a [2,19,19] float32 tensor:
-      - channel 0: Current board - Black stones = 1.0, White stones = 0.0, Empty = 0.0
-      - channel 1: Previous board - Black stones = 1.0, White stones = 0.0, Empty = 0.0
+    Convert the current and previous positions into a [18,19,19] float32 tensor:
+      Base channels (6):
+      - channels 0,1: Current board - Black stones = 1.0, White stones = 0.0, Empty = 0.0
+      - channels 2,3: Previous board (t-1) - Black stones = 1.0, White stones = 0.0, Empty = 0.0
+      - channels 4,5: Previous-previous board (t-2) - Black stones = 1.0, White stones = 0.0, Empty = 0.0
     """
     current = game.board.float().to(device)  # shape [19,19], values ∈ {-1,0,+1}
     
-    # Get previous board state if it exists, otherwise use zeros
-    if game.history:
-        prev = game.history[-1].float().to(device)  # shape [19,19]
+    # Get previous board states if they exist, otherwise use zeros
+    if len(game.history) >= 2:
+        prev = game.history[-1].float().to(device)  # t-1
+        prev_prev = game.history[-2].float().to(device)  # t-2
+    elif len(game.history) == 1:
+        prev = game.history[-1].float().to(device)  # t-1
+        prev_prev = torch.zeros_like(current)  # t-2 (empty)
     else:
-        prev = torch.zeros_like(current)  # shape [19,19]
+        prev = torch.zeros_like(current)  # t-1 (empty)
+        prev_prev = torch.zeros_like(current)  # t-2 (empty)
 
     # Convert to binary planes for each color
     BLACK = game.BLACK
@@ -89,12 +99,20 @@ def state_to_tensor(game: GoGame, device: torch.device) -> torch.Tensor:
     current_black = (current == BLACK).to(torch.float32)  # 1.0 where Black stones
     current_white = (current == WHITE).to(torch.float32)  # 1.0 where White stones
     
-    # Previous board
+    # Previous board (t-1)
     prev_black = (prev == BLACK).to(torch.float32)  # 1.0 where Black stones
     prev_white = (prev == WHITE).to(torch.float32)  # 1.0 where White stones
     
+    # Previous-previous board (t-2)
+    prev_prev_black = (prev_prev == BLACK).to(torch.float32)  # 1.0 where Black stones
+    prev_prev_white = (prev_prev == WHITE).to(torch.float32)  # 1.0 where White stones
+    
     # Stack current and previous states
-    state = torch.stack([current_black, current_white, prev_black, prev_white], dim=0)  # [4,19,19]
+    state = torch.stack([
+        current_black, current_white,
+        prev_black, prev_white,
+        prev_prev_black, prev_prev_white
+    ], dim=0)  # [6,19,19]
     return state
 
 
@@ -107,7 +125,7 @@ def play_self_play_game(
         classic_or_mini: bool = True, # mini
 ) -> List[Example]:
     """
-    Play a full game via MCTS + the current policy_value_net.
+    Play a full game via batched MCTS + the current policy_value_net.
     Returns a list of training examples (state, pi, z).
 
     `temp_threshold`: the move index t at which we switch from sampling (when t < temp_threshold)
@@ -117,7 +135,7 @@ def play_self_play_game(
     BOARD_SIZE = policy_value_net.BOARD_SIZE  # 19 for full size
     game = GoGame(BOARD_SIZE)
 
-    # End games of extrordinary length
+    # End games of extraordinary length
     if classic_or_mini == True:  # if mini or 9x9 board
         max_moves = 128
     else: # classic, 19x19
@@ -126,53 +144,24 @@ def play_self_play_game(
     move_count = 0
     while not game.game_over:
         # 1) Build state tensor
-        state_tensor = state_to_tensor(game, device).unsqueeze(0)  # [1, 4,19,19]
+        state_tensor = state_to_tensor(game, device).unsqueeze(0)  # [1, 6,19,19]
         state_tensor = torch.concat([state_tensor,
                                      generate_influence_fields(state_tensor, sigma=1),  # Use full state for influence
                                      generate_influence_fields(state_tensor, sigma=3),
                                      generate_influence_fields(state_tensor, sigma=6)
                                      ], dim=1).squeeze()
-        # stacks to [1, 16, 19, 19] then squeezes out bs = 1 to [16, 19, 19]
-
-        # 2) Run MCTS to obtain visit counts
-        #    We need not return the "best move" here; we want the full distribution π.
-        #    To do that, slightly modify run_mcts to return the root node itself.
-        root = MCTSNode(game.clone(), parent=None, move=None)
-        for _ in range(num_playouts):
-            node = root
-            path = [node]
-            # Selection
-            while True:
-                if node.P is None or node.game.game_over:
-                    break
-                mv, node = node.select_child(c_puct)
-                path.append(node)
-            # Expansion & Evaluation
-            if node.game.game_over:
-                score = node.game.score()
-                b_score = score['black_score']
-                w_score = score['white_score'] 
-                if b_score > w_score:
-                    value_leaf = +1.0
-                elif w_score > b_score:
-                    value_leaf = -1.0
-                else:
-                    value_leaf = 0.0
-            else:
-                value_leaf = node.expand_and_evaluate(policy_value_net, device)
-            # Backpropagation
-            for i in range(len(path) - 1):
-                parent = path[i]
-                child = path[i + 1]
-                mv_taken = child.move
-                parent.visits += 1
-                parent.N[mv_taken] += 1
-                parent.W[mv_taken] += value_leaf
-                parent.Q[mv_taken] = parent.W[mv_taken] / parent.N[mv_taken]
-                value_leaf = -value_leaf
-            path[-1].visits += 1
-
-        # 3) Extract π: normalize visits at root over all legal moves
+        print(f"State tensor shape: {state_tensor.shape}")
+        # 2) Run batched MCTS to obtain visit counts
+        root_game = game.clone()
+        best_move, root = run_batched_mcts(root_game,
+                                         policy_value_net,
+                                         device,
+                                         num_playouts,
+                                         c_puct,
+                                         training=True,
+                                         temperature=1.0)
+        
+        # Get visit counts from root node
         pi = torch.zeros(BOARD_SIZE**2 + 1, dtype=torch.float32, device=device)  # +1 for pass
         total_N = 0
         for mv, child in root.children.items():
@@ -185,7 +174,7 @@ def play_self_play_game(
         if total_N > 0:
             pi /= total_N
 
-        # 4) Decide next action: sample or argmax depending on move_count
+        # 3) Decide next action: sample or argmax depending on move_count
         if move_count < temp_threshold:
             # Sample from π with temperature 1.0 (i.e. directly proportional)
             pi_numpy = pi.detach().numpy(force = True)
@@ -211,24 +200,22 @@ def play_self_play_game(
             else:
                 chosen_move = (top_idx // BOARD_SIZE, top_idx % BOARD_SIZE)
 
-        # 5) Compute z later, but for now store (state, pi) and placeholder for z
+        # 4) Store example and play move
         examples.append((state_tensor, pi.clone(), None))
 
-        # 6) Play the move in the real game
         if chosen_move is None:
             game.play_move()  # pass
         else:
             game.play_move(chosen_move[0], chosen_move[1])
 
         move_count += 1
-
         if move_count > max_moves:
             game.game_over = True
 
-    # 7) Game is over: compute final outcome z from Black's perspective
+    # 5) Game is over: compute final outcome z from Black's perspective
     score = game.score()
     b_score = score['black_score']
-    w_score = score['white_score'] 
+    w_score = score['white_score']
     if b_score > w_score:
         z = +1.0
     elif w_score > b_score:
@@ -236,7 +223,7 @@ def play_self_play_game(
     else:
         z = 0.0
 
-    # 8) Fill in z for all stored examples
+    # 6) Fill in z for all stored examples
     finalized_examples: List[Example] = []
     for (state_tensor, pi_tensor, _) in examples:
         z_tensor = torch.tensor([z], dtype=torch.float32, device=device)
