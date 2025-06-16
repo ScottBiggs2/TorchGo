@@ -12,42 +12,8 @@ from mcts.run_batched_mcts import run_batched_mcts
 from mcts.batch_mcts_node import MCTSNode
 from mcts.batch_mcts_node import generate_influence_fields
 
-# def generate_influence_fields(stone_tensor: torch.Tensor, sigma: float = 1) -> torch.Tensor:
-#     """
-#     Input:  stone_tensor of shape (bs, 4, 19, 19)
-#            - channels 0,1: current board (black, white)
-#            - channels 2,3: previous board (black, white)
-#     Output: influence_tensor of shape (bs, 4, 19, 19)
-#            - channels 0,1: influence fields for current board
-#            - channels 2,3: influence fields for previous board
-#     """
-#     bs, ch, h, w = stone_tensor.shape
-#     assert ch == 4, "Expected 4 input channels (current black/white, previous black/white)"
 
-#     # Build 2D Gaussian kernel
-#     kernel_size = int(6 * sigma) | 1  # make it odd
-#     coords = torch.arange(kernel_size) - kernel_size // 2
-#     x_grid, y_grid = torch.meshgrid(coords, coords, indexing="ij")
-#     gaussian_kernel = torch.exp(-(x_grid**2 + y_grid**2) / (2 * sigma**2))
-#     gaussian_kernel /= gaussian_kernel.sum()  # Normalize
-#     kernel = gaussian_kernel.unsqueeze(0).unsqueeze(0)  # shape (1,1,K,K)
 
-#     # Prepare to convolve each color channel independently
-#     kernel = kernel.to(stone_tensor.device)
-#     influence = torch.zeros_like(stone_tensor)
-
-#     for i in range(ch):  # current black, current white, previous black, previous white
-#         influence[:, i:i+1] = F.conv2d(
-#             stone_tensor[:, i:i+1],  # shape (bs,1,19,19)
-#             kernel, padding=kernel_size // 2
-#         )
-
-#     return influence
-
-# Each example: (state_tensor, mcts_policy, z_value)
-#   - state_tensor: torch.FloatTensor, shape [16,19,19] (4 base + 12 influence channels)
-#   - mcts_policy:  torch.FloatTensor, shape [361] (visit‐count distribution)
-#   - z_value:      torch.FloatTensor, shape [1] (±1)
 Example = Tuple[torch.Tensor, torch.Tensor, torch.Tensor]
 
 class ReplayBuffer:
@@ -136,10 +102,7 @@ def play_self_play_game(
     game = GoGame(BOARD_SIZE)
 
     # End games of extraordinary length
-    if classic_or_mini == True:  # if mini or 9x9 board
-        max_moves = 128
-    else: # classic, 19x19
-        max_moves = 256
+    max_moves = 128 if classic_or_mini else 256
 
     move_count = 0
     while not game.game_over:
@@ -150,6 +113,7 @@ def play_self_play_game(
                                      generate_influence_fields(state_tensor, sigma=3),
                                      generate_influence_fields(state_tensor, sigma=6)
                                      ], dim=1).squeeze()
+        
         #State tensor shape: torch.Size([24, 9, 9])
         # print(f"State tensor shape: {state_tensor.shape}")
         # 2) Run batched MCTS to obtain visit counts
@@ -177,8 +141,8 @@ def play_self_play_game(
 
         # 3) Decide next action: sample or argmax depending on move_count
         if move_count < temp_threshold:
-            # Sample from π with temperature 1.0 (i.e. directly proportional)
-            pi_numpy = pi.detach().numpy(force = True)
+            # Sample from π with temperature 1.0
+            pi_numpy = pi.detach().cpu().numpy()  # Move to CPU before converting to numpy
             legal_indices = pi_numpy.nonzero()[0]
             if legal_indices.size == 0:
                 chosen_move = None  # must pass
@@ -213,6 +177,11 @@ def play_self_play_game(
         if move_count > max_moves:
             game.game_over = True
 
+        # Clear some memory
+        del state_tensor, pi
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
     # 5) Game is over: compute final outcome z from Black's perspective
     score = game.score()
     b_score = score['black_score']
@@ -229,5 +198,10 @@ def play_self_play_game(
     for (state_tensor, pi_tensor, _) in examples:
         z_tensor = torch.tensor([z], dtype=torch.float32, device=device)
         finalized_examples.append((state_tensor, pi_tensor, z_tensor))
+
+    # Clear memory
+    del examples
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
     return finalized_examples

@@ -3,7 +3,6 @@ from typing import Optional, Tuple, List
 
 class GoGame:
     def __init__(self, BOARD_SIZE):
-
         self.BLACK = -1
         self.WHITE = 1
         self.EMPTY = 0
@@ -25,10 +24,11 @@ class GoGame:
         self.last_move = None
         self.pass_count = 0
         
-        # Add move cycle detection
+        # Optimize move cycle detection
         self.move_cycle = []  # Store last few moves
         self.cycle_threshold = 5  # Number of repeats before ending game
-        self.cycle_length = 2  # Length of cycle to detect (e.g., 2 for alternating moves)
+        self.cycle_length = 2  # Length of cycle to detect
+        self.last_same_player_move = None  # Track last move by same player for Ko
 
     def copy_board(self) -> torch.Tensor:
         return self.board.clone()
@@ -150,11 +150,7 @@ class GoGame:
         group = self._flood_fill_group(x, y, temp_board, visited=None)
         return (self._count_liberties(group, temp_board) == 0)
 
-    def is_legal(
-        self,
-        x: int,
-        y: int
-    ) -> bool:
+    def is_legal(self, x: int, y: int) -> bool:
         """
         Returns False if:
           - (x,y) is off‐board or not empty
@@ -172,32 +168,50 @@ class GoGame:
         if self.is_suicide(x, y, self.current_player):
             return False
 
-        # 3) Ko check: check if this move would make the board identical to same player's last move
-        if len(self.history) >= 2:
-            # Find the last move by the same player
-            same_player_last_move = None
-            for i in range(len(self.history) - 1, -1, -1):
-                if i % 2 == (len(self.history) - 1) % 2:  # Same player's turn
-                    same_player_last_move = i
-                    break
+            #     if len(self.history) >= 2:
+            # # Find the last move by the same player
+            # same_player_last_move = None
+            # for i in range(len(self.history) - 1, -1, -1):
+            #     if i % 2 == (len(self.history) - 1) % 2:  # Same player's turn
+            #         same_player_last_move = i
+            #         break
             
-            if same_player_last_move is not None:
-                # Simulate the current move
-                backup = self.copy_board()
-                backup[x, y] = self.current_player
+            # if same_player_last_move is not None:
+            #     # Simulate the current move
+            #     backup = self.copy_board()
+            #     backup[x, y] = self.current_player
                 
-                # Remove any captures
-                visited = set()
-                for nx, ny in self.get_neighbors(x, y):
-                    if backup[nx, ny].item() == self.opponent(self.current_player) and (nx, ny) not in visited:
-                        group = self._flood_fill_group(nx, ny, backup, visited)
-                        if self._count_liberties(group, backup) == 0:
-                            for gx, gy in group:
-                                backup[gx, gy] = self.EMPTY
+            #     # Remove any captures
+            #     visited = set()
+            #     for nx, ny in self.get_neighbors(x, y):
+            #         if backup[nx, ny].item() == self.opponent(self.current_player) and (nx, ny) not in visited:
+            #             group = self._flood_fill_group(nx, ny, backup, visited)
+            #             if self._count_liberties(group, backup) == 0:
+            #                 for gx, gy in group:
+            #                     backup[gx, gy] = self.EMPTY
                 
-                # Check if the resulting board matches the same player's last move
-                if torch.equal(backup, self.history[same_player_last_move]):
-                    return False
+            #     # Check if the resulting board matches the same player's last move
+            #     if torch.equal(backup, self.history[same_player_last_move]):
+            #         return False
+
+        # 3) Ko check: check if this move would make the board identical to same player's last move
+        if self.last_same_player_move is not None:
+            # Simulate the current move
+            backup = self.copy_board()
+            backup[x, y] = self.current_player
+            
+            # Remove any captures
+            visited = set()
+            for nx, ny in self.get_neighbors(x, y):
+                if backup[nx, ny].item() == self.opponent(self.current_player) and (nx, ny) not in visited:
+                    group = self._flood_fill_group(nx, ny, backup, visited)
+                    if self._count_liberties(group, backup) == 0:
+                        for gx, gy in group:
+                            backup[gx, gy] = self.EMPTY
+            
+            # Check if the resulting board matches the same player's last move
+            if torch.equal(backup, self.history[self.last_same_player_move]):
+                return False
 
         return True
 
@@ -235,26 +249,30 @@ class GoGame:
 
         # Append to history for Ko
         self.history.append(self.copy_board())
+        
+        # Update last same player move for Ko
+        if len(self.history) >= 2:
+            if len(self.history) % 2 == 0:  # White's move
+                self.last_same_player_move = len(self.history) - 2
+            else:  # Black's move
+                self.last_same_player_move = len(self.history) - 1
 
         # Log the move
         self.move_log.append((self.current_player, x, y))
         self.pass_count = 0
         
-        # Check for move cycles
+        # Optimize move cycle detection
         self.move_cycle.append((x, y))
         if len(self.move_cycle) >= self.cycle_length * self.cycle_threshold:
-            # Check if we have a repeating pattern
+            # Use a more efficient cycle detection
+            cycle_start = len(self.move_cycle) - self.cycle_length
             is_cycle = True
             for i in range(self.cycle_length):
-                for j in range(self.cycle_threshold):
-                    if self.move_cycle[-self.cycle_length * (j+1) + i] != self.move_cycle[-self.cycle_length + i]:
-                        is_cycle = False
-                        break
-                if not is_cycle:
+                if self.move_cycle[cycle_start + i] != self.move_cycle[cycle_start - self.cycle_length + i]:
+                    is_cycle = False
                     break
             
             if is_cycle:
-                # print(f"DEBUG: Detected move cycle after {len(self.move_cycle)} moves. Ending game.")
                 self.game_over = True
             
             # Keep only the last cycle_length * cycle_threshold moves

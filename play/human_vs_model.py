@@ -252,6 +252,15 @@ def play_vs_net(policy_value_net: PolicyValueNet,
                 fig_mcts = plot_policy(game, visit_counts)
                 display(fig_mcts)
 
+        # Track scores after each move
+        score = game.score()
+        black_scores.append(score['black_score'])
+        white_scores.append(score['white_score'])
+
+        if displays:
+            print(f"Evaluation (value ∈ [-1,+1], +1=Black wins, -1=White wins): {eval:.3f}")
+            print(f"Current territory - Black: {score['black_score']}, White: {score['white_score']}\n")
+
     # Game is over: show final board and result
     fig_final = plot_board(game)
     display(fig_final)
@@ -283,12 +292,15 @@ def play_vs_net(policy_value_net: PolicyValueNet,
     moves = list(range(len(evals)))
 
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 10))
+    
+    # Plot evaluation values
     ax1.plot(moves, evals, marker='o')
     ax1.set_title("Value (Win Estimate) over Moves")
     ax1.set_xlabel("Move Number")
     ax1.set_ylabel("Value (–1 to +1)")
     ax1.grid(True)
 
+    # Plot scores from the stored lists
     ax2.plot(moves, black_scores, label="Black Score")
     ax2.plot(moves, white_scores, label="White Score")
     ax2.set_title("Score over Moves")
@@ -298,6 +310,7 @@ def play_vs_net(policy_value_net: PolicyValueNet,
     ax2.grid(True)
 
     plt.tight_layout()
+    display(fig)
     plt.close(fig)
     
     return fig

@@ -9,3 +9,5 @@ time
 math
 collections
 random
+psutil>=7.0.0
+gc

@@ -59,8 +59,6 @@ class BatchedMCTS:
         if not self.queue:
             return
             
-        # print(f"\nDEBUG: Processing batch of {len(self.queue)} nodes")
-        
         # Filter out terminal nodes
         terminal_nodes = []
         non_terminal_nodes = []
@@ -83,33 +81,39 @@ class BatchedMCTS:
         
         # Process non-terminal nodes
         if non_terminal_nodes:
-            state_tensors = [node.get_state_tensor(self.device) for node in non_terminal_nodes]
-            batch = torch.cat(state_tensors, dim=0)
+            # Pre-allocate tensors for batch processing
+            batch_size = len(non_terminal_nodes)
+            state_tensors = []
             
-            # print(f"DEBUG: Batch shape: {batch.shape}")
-            # print(f"DEBUG: Batch values range: [{batch.min()}, {batch.max()}]")
+            # Collect state tensors
+            for node in non_terminal_nodes:
+                state = node.get_state_tensor(self.device)
+                state_tensors.append(state)
+            
+            # Concatenate efficiently
+            batch = torch.cat(state_tensors, dim=0)
             
             with torch.no_grad():
                 policy_logits_batch, values_batch = self.net(batch)
+            
+            # Move to CPU for processing
             policy_logits_batch = policy_logits_batch.cpu()
             values_batch = values_batch.squeeze(1).cpu().numpy()
             
-            # print(f"DEBUG: Policy logits shape: {policy_logits_batch.shape}")
-            # print(f"DEBUG: Policy logits range: [{policy_logits_batch.min()}, {policy_logits_batch.max()}]")
-            # print(f"DEBUG: Values shape: {values_batch.shape}")
-            # print(f"DEBUG: Values range: [{values_batch.min()}, {values_batch.max()}]")
-            
+            # Process each node
             for (node, path), policy_logits, value in zip(
                 zip(non_terminal_nodes, non_terminal_paths), policy_logits_batch, values_batch):
-                # print(f"DEBUG: Expanding node with value {value}")
-                # Ensure we're expanding the node with the correct policy logits
                 if node.P is None:  # Double check node hasn't been expanded
                     self._expand_node(node, policy_logits)
-                    # Verify expansion was successful
                     if node.P is None:
                         print("ERROR: Node expansion failed!")
                         continue
                 self._backpropagate(path, float(value))
+            
+            # Clear memory
+            del state_tensors, batch, policy_logits_batch, values_batch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
         
         self.queue.clear()
 

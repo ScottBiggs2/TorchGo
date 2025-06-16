@@ -162,6 +162,10 @@ def train_policy_value_net(
         game_start_time = time.time()
 
         for g in range(games_per_iteration):
+            # Clear CUDA cache before each game
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            
             examples = play_self_play_game(net, device, num_playouts, c_puct, temp_threshold, classic_or_mini)
             iteration_examples.extend(examples)
             print(f"  Self-play game {g+1}/{games_per_iteration}: {len(examples)} positions.")
@@ -176,22 +180,22 @@ def train_policy_value_net(
             print("  Not enough samples in buffer yet to train.")
             continue
 
-        # Create a DataLoader over a snapshot of buffer’s contents (to avoid sampling anew each epoch)
-        # by randomly flipping on x and y axes we access all 4 axes of symmetry in Go
+        # Create a DataLoader over a snapshot of buffer's contents
         data_snapshot = list(replay_buffer.buffer)
-        dataset = GameDataset(data_snapshot, transforms = None) # transform not quite working
-        loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
-        states, pi_targets, z_targets = next(iter(loader))
+        dataset = GameDataset(data_snapshot, transforms=None)
+        loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, pin_memory=True)
 
         net.train()
         epoch_start = time.time()
         for epoch in range(epochs_per_iter):
             epoch_loss = 0.0
+            batch_count = 0
+            
             for states, pi_targets, z_targets in loader:
-                # states: [B,4,19,19], pi_targets: [B,361], z_targets: [B,1]
-                states = states.to(device)
-                pi_targets = torch.nan_to_num(pi_targets).to(device) + 1e-8
-                z_targets = z_targets.to(device)
+                # Move tensors to device
+                states = states.to(device, non_blocking=True)
+                pi_targets = torch.nan_to_num(pi_targets).to(device, non_blocking=True) + 1e-8
+                z_targets = z_targets.to(device, non_blocking=True)
 
                 optimizer.zero_grad()
                 policy_out, value_out = net(states)      # policy_out: [B,361], value_out: [B,1]
@@ -199,10 +203,31 @@ def train_policy_value_net(
 
                 loss.backward()
                 optimizer.step()
-                epoch_loss += loss.item()
-            print(f"    Epoch {epoch+1}/{epochs_per_iter}: Loss = {epoch_loss/len(loader):.4f}")
+                
+                # Move loss to CPU and add to epoch total
+                epoch_loss += loss.detach().cpu().item()
+                batch_count += 1
+                
+                # Clear some memory
+                del states, pi_targets, z_targets, policy_out, value_out, loss
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            
+            avg_loss = epoch_loss / batch_count
+            print(f"    Epoch {epoch+1}/{epochs_per_iter}: Loss = {avg_loss:.4f}")
+            
         epoch_end = time.time()
         iter_end = time.time()
-        print(f" === \n Iteration {it+1} took: {(iter_end - iter_start):.2f}s\n Games {(game_end_time - game_start_time)/games_per_iteration:.2f}s per game \n Epochs avg {(epoch_end - epoch_start)/epochs_per_iter:.2f}s per epoch \n ===")
+        
+        # Print timing information
+        print(f" === \n Iteration {it+1} took: {(iter_end - iter_start):.2f}s")
+        print(f" Games {(game_end_time - game_start_time)/games_per_iteration:.2f}s per game")
+        print(f" Epochs avg {(epoch_end - epoch_start)/epochs_per_iter:.2f}s per epoch")
+        print(f" ===")
+        
+        # Clear memory after each iteration
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            
     return net
 

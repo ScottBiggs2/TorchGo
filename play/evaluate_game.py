@@ -23,7 +23,8 @@ def review_game(
     game = GoGame(board_size)
     move_history = []
     value_history = []
-    territory_history = []
+    black_scores = []
+    white_scores = []
 
     BOARD_SIZE = game.BOARD_SIZE
     BLACK = game.BLACK
@@ -31,7 +32,6 @@ def review_game(
 
     NUM_MOVES = BOARD_SIZE * BOARD_SIZE
     print("Enter moves to review. Format: 'row col' (0-based). Type 'pass' to pass, 'done' to end review.")
-
 
     while not game.game_over:
         # Plot current board
@@ -62,6 +62,7 @@ def review_game(
             policy, value = policy_value_net(state_tensor)
             raw_policy = policy.squeeze(0)  # [NUM_MOVES]
             value = float(value.item())
+            value_history.append(value)
 
         print("Network showing raw policy prior...\n")
         fig_raw = plot_policy(game, raw_policy)
@@ -105,16 +106,14 @@ def review_game(
                 else:
                     print(f"{i+1}. {move} (visits: {root.N[move]})")
 
-        # Record evaluation and territory
-        value_history.append(value)
-        territory = game.estimate_territory()
-        territory_history.append((territory['black_territory'], territory['white_territory']))
+        # Track scores after each move
+        score = game.score()
+        black_scores.append(score['black_score'])
+        white_scores.append(score['white_score'])
 
         # Show current evaluation
         print(f"Evaluation (value ∈ [-1,+1], +1=Black wins, -1=White wins): {value:.3f}")
-    
-        print(f"\nNetwork evaluation: {value:.3f} (Black winning: 1, White winning: -1)")
-        print(f"Current territory - Black: {territory['black_territory']}, White: {territory['white_territory']}\n")
+        print(f"Current territory - Black: {score['black_score']}, White: {score['white_score']}\n")
 
     # Game is over: show final board
     fig_final = plot_board(game)
@@ -130,16 +129,17 @@ def review_game(
 
     # Plot evaluation and score over move number
     moves = list(range(len(value_history)))
-    black_scores = [t[0] for t in value_history]
-    white_scores = [t[1] for t in value_history]
 
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 10))
+    
+    # Plot evaluation values
     ax1.plot(moves, value_history, marker='o')
     ax1.set_title("Value (Win Estimate) over Moves")
     ax1.set_xlabel("Move Number")
     ax1.set_ylabel("Value (–1 to +1)")
     ax1.grid(True)
 
+    # Plot scores from the stored lists
     ax2.plot(moves, black_scores, label="Black Score")
     ax2.plot(moves, white_scores, label="White Score")
     ax2.set_title("Score over Moves")

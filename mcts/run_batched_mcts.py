@@ -36,10 +36,10 @@ def run_batched_mcts(root_game: GoGame,
     root = MCTSNode(root_game.clone())
     batched_mcts = BatchedMCTS(
         net, device, 
-        batch_size=16, 
+        batch_size=64,  # Increased from 16 to 64 for better GPU utilization
         c_puct=c_puct,
         training=training,
-        dirichlet_alpha=0.03
+        dirichlet_alpha=0.05
     )
     
     # Run simulations
@@ -63,10 +63,9 @@ def run_batched_mcts(root_game: GoGame,
             if node.P is None:
                 # print(f"DEBUG: Node needs expansion, adding to batch queue")
                 batched_mcts.add_to_queue(node, path)
-                # Only process batch if it's full or this is the last simulation
+                # Process batch if it's full or we've accumulated enough nodes
                 if len(batched_mcts.queue) >= batched_mcts.batch_size or sim == num_playouts - 1:
                     batched_mcts.process_batch()
-                    # If the node still isn't expanded, something is wrong
                     if node.P is None:
                         print("ERROR: Node failed to expand after batch processing")
                         break
