@@ -31,14 +31,14 @@ def __main__():
     net.to(device)
 
     # Hyperparameters
-    num_iterations = 2  # increased from 1
-    games_per_iteration = 10  # increased from 5
-    num_playouts = 64  # increased from 16
+    num_iterations = 3  # increased from 1
+    games_per_iteration = 5  # increased from 5
+    num_playouts = 256  # increased from 16
     c_puct = 1.5
     temp_threshold = 4
     replay_capacity = 20480
     batch_size = 256
-    epochs_per_iter = 5  # increased from 3
+    epochs_per_iter = 3  # increased from 3
     lr = 1e-3
     l2_coef = 1e-4
 
@@ -65,7 +65,7 @@ def __main__():
         )
 
         # Save the model
-        torch.save(trained_net.state_dict(), "models/TorchGo-mini-test-3.pth")
+        torch.save(trained_net.state_dict(), "models/TorchGo-mini-test-4.pth")
         
         # Clean up
         del trained_net, replay_buffer
