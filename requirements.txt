@@ -11,3 +11,5 @@ collections
 random
 psutil>=7.0.0
 gc
+tqdm
+

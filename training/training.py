@@ -43,6 +43,9 @@ class GameDataset(Dataset):
 
         return state, pi, z
 
+def count_parameters(model):
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
 def compute_loss(
     policy_pred: torch.Tensor,  # [B,361], *softmax* probabilities
     value_pred: torch.Tensor,   # [B,1], tanh outputs in [-1,+1]

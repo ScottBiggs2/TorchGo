@@ -2,13 +2,14 @@ import torch
 import numpy as np
 import matplotlib.pyplot as plt
 from IPython.display import display
+from typing import Dict, List, Tuple
+from tqdm import tqdm
 
 from boards.board_manager import GoGame
 from models.policy_value_model import PolicyValueNet
 from mcts.run_batched_mcts import run_batched_mcts
 from training.self_play_system import state_to_tensor, generate_influence_fields
 from play.human_vs_model import plot_board, plot_policy
-
 
 def bot_vs_bot(
         black_net: PolicyValueNet,
@@ -196,5 +197,155 @@ def bot_vs_bot(
     if return_moves:
         results["move_history"] = move_history
 
+    return results
+
+
+def run_match_series(
+        model_a: PolicyValueNet,
+        model_b: PolicyValueNet,
+        device: torch.device,
+        num_games: int = 100,
+        num_playouts: int = 256,
+        c_puct: float = 1.5,
+        board_size: int = 9,
+        temperature: float = 0.0,
+        display_progress: bool = True,
+) -> Dict:
+    """
+    Run a series of games between two models and analyze the results.
+    
+    Args:
+        model_a: First model to compare
+        model_b: Second model to compare
+        device: Torch device to use
+        num_games: Number of games to play
+        num_playouts: Number of MCTS playouts per move
+        c_puct: Exploration constant for MCTS
+        board_size: Size of the Go board
+        temperature: Controls move selection randomness (0.0=deterministic, 1.0=exploration)
+        display_progress: Whether to show progress bar
+        
+    Returns:
+        Dictionary containing:
+        - model_a_wins: Number of games won by model A
+        - model_b_wins: Number of games won by model B
+        - ties: Number of tied games
+        - win_rate: Model A's win rate (wins / total games)
+        - avg_score_diff: Average score difference (model A - model B)
+        - game_results: List of individual game results
+        - confidence_interval: 95% confidence interval for win rate
+    """
+    results = {
+        "model_a_wins": 0,
+        "model_b_wins": 0,
+        "ties": 0,
+        "game_results": [],
+        "score_diffs": []
+    }
+    
+    # Create progress bar if requested
+    iterator = tqdm(range(num_games)) if display_progress else range(num_games)
+    
+    for game_num in iterator:
+        # Alternate which model plays as black/white
+        if game_num % 2 == 0:
+            black_net, white_net = model_a, model_b
+            is_model_a_black = True
+        else:
+            black_net, white_net = model_b, model_a
+            is_model_a_black = False
+            
+        # Play the game
+        game_result = bot_vs_bot(
+            black_net=black_net,
+            white_net=white_net,
+            device=device,
+            num_playouts=num_playouts,
+            c_puct=c_puct,
+            board_size=board_size,
+            displays=False,  # Disable displays for faster execution
+            return_moves=False,
+            temperature=temperature
+        )
+        
+        # Record the result
+        winner = game_result["winner"]
+        final_score = game_result["final_score"]
+        
+        # Determine which model won
+        if winner == "tie":
+            results["ties"] += 1
+            model_a_result = "tie"
+        else:
+            if (winner == "black" and is_model_a_black) or (winner == "white" and not is_model_a_black):
+                results["model_a_wins"] += 1
+                model_a_result = "win"
+            else:
+                results["model_b_wins"] += 1
+                model_a_result = "loss"
+        
+        # Calculate score difference from model A's perspective
+        if is_model_a_black:
+            score_diff = final_score["black_score"] - final_score["white_score"]
+        else:
+            score_diff = final_score["white_score"] - final_score["black_score"]
+        results["score_diffs"].append(score_diff)
+        
+        # Store individual game result
+        results["game_results"].append({
+            "game_num": game_num + 1,
+            "model_a_color": "black" if is_model_a_black else "white",
+            "result": model_a_result,
+            "score_diff": score_diff,
+            "final_score": final_score
+        })
+        
+        # Update progress bar description if enabled
+        if display_progress:
+            win_rate = results["model_a_wins"] / (game_num + 1)
+            iterator.set_description(f"Model A win rate: {win_rate:.2%}")
+    
+    # Calculate final statistics
+    total_games = results["model_a_wins"] + results["model_b_wins"] + results["ties"]
+    results["win_rate"] = results["model_a_wins"] / total_games
+    results["avg_score_diff"] = np.mean(results["score_diffs"])
+    
+    # Calculate 95% confidence interval for win rate
+    # Using normal approximation of binomial distribution
+    p = results["win_rate"]
+    n = total_games
+    z = 1.96  # 95% confidence level
+    margin = z * np.sqrt((p * (1 - p)) / n)
+    results["confidence_interval"] = (p - margin, p + margin)
+    
+    # Print summary
+    print("\nMatch Series Results:")
+    print(f"Total games: {total_games}")
+    print(f"Model A wins: {results['model_a_wins']} ({results['win_rate']:.1%})")
+    print(f"Model B wins: {results['model_b_wins']} ({results['model_b_wins']/total_games:.1%})")
+    print(f"Ties: {results['ties']} ({results['ties']/total_games:.1%})")
+    print(f"Average score difference (Model A - Model B): {results['avg_score_diff']:.1f}")
+    print(f"95% confidence interval for Model A win rate: ({results['confidence_interval'][0]:.1%}, {results['confidence_interval'][1]:.1%})")
+    
+    # Plot win rate over time
+    plt.figure(figsize=(10, 6))
+    cumulative_wins = np.cumsum([1 if r["result"] == "win" else 0 for r in results["game_results"]])
+    games_played = np.arange(1, total_games + 1)
+    win_rates = cumulative_wins / games_played
+    
+    plt.plot(games_played, win_rates, label='Win Rate')
+    plt.axhline(y=0.5, color='r', linestyle='--', label='Equal Win Rate')
+    plt.fill_between(games_played, 
+                     [max(0, r - 1.96 * np.sqrt((r * (1-r)) / n)) for r, n in zip(win_rates, games_played)],
+                     [min(1, r + 1.96 * np.sqrt((r * (1-r)) / n)) for r, n in zip(win_rates, games_played)],
+                     alpha=0.2, label='95% Confidence Interval')
+    
+    plt.title('Model A Win Rate Over Time')
+    plt.xlabel('Games Played')
+    plt.ylabel('Win Rate')
+    plt.legend()
+    plt.grid(True)
+    plt.show()
+    
     return results
 

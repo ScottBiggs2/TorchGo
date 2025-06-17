@@ -7,10 +7,11 @@ import psutil  # For memory monitoring
 
 from boards.board_manager import GoGame
 from models.policy_value_model import PolicyValueNet
+from models.policy_value_transformer import PolicyValueTransformer   
 from mcts.monte_carlo_tree_search_nodes import MCTSNode
 from mcts.run_monte_carlo_tree_search import run_mcts
 from training.self_play_system import ReplayBuffer, play_self_play_game
-from training.training import train_policy_value_net
+from training.training import train_policy_value_net, count_parameters
 from play.human_vs_model import play_vs_net
 
 def print_memory_usage():
@@ -26,14 +27,17 @@ def __main__():
     
     BOARD_SIZE = 9
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    net = PolicyValueNet(BOARD_SIZE)
+    # net = PolicyValueNet(BOARD_SIZE)
+    net = PolicyValueTransformer(BOARD_SIZE)
     # net.load_state_dict(torch.load("models/TorchGo-mini-light.pth"))
     net.to(device)
+    
+    print(f"Number of parameters: {count_parameters(net)}")
 
     # Hyperparameters
-    num_iterations = 3  # increased from 1
-    games_per_iteration = 5  # increased from 5
-    num_playouts = 256  # increased from 16
+    num_iterations = 1  
+    games_per_iteration = 5  
+    num_playouts = 128  
     c_puct = 1.5
     temp_threshold = 4
     replay_capacity = 20480
@@ -65,7 +69,7 @@ def __main__():
         )
 
         # Save the model
-        torch.save(trained_net.state_dict(), "models/TorchGo-mini-test-4.pth")
+        torch.save(trained_net.state_dict(), "models/TorchGo-transformer-mini-test-1.pth")
         
         # Clean up
         del trained_net, replay_buffer
