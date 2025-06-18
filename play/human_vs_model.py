@@ -170,6 +170,7 @@ def play_vs_net(policy_value_net: PolicyValueNet,
     evals = []
     white_scores = []
     black_scores = []
+    move_count = 0
 
     while not game.game_over:
         # Plot current board
@@ -193,11 +194,17 @@ def play_vs_net(policy_value_net: PolicyValueNet,
                 game.play_move(user_move[0], user_move[1])
                 print(f"You played at {user_move}.\n")
 
-                    # Track scores after each move
-            score = game.score()
-            black_scores.append(score['black_score'])
-            white_scores.append(score['white_score'])
-            
+            # Get network's evaluation after human's move
+            state_tensor = state_to_tensor(game, device).unsqueeze(0)
+            state_tensor = torch.concat([state_tensor,
+                                       generate_influence_fields(state_tensor, sigma=1),
+                                       generate_influence_fields(state_tensor, sigma=3),
+                                       generate_influence_fields(state_tensor, sigma=6)
+                                      ], dim=1)
+            with torch.no_grad():
+                _, eval = policy_value_net(state_tensor)
+                evals.append(float(eval.item()))
+
         else:
             # ---- Network's turn ----
 
@@ -262,6 +269,7 @@ def play_vs_net(policy_value_net: PolicyValueNet,
         score = game.score()
         black_scores.append(score['black_score'])
         white_scores.append(score['white_score'])
+        move_count += 1
 
         if displays:
             print(f"Evaluation (value ∈ [-1,+1], +1=Black wins, -1=White wins): {float(eval.item()):.3f}")
@@ -295,7 +303,7 @@ def play_vs_net(policy_value_net: PolicyValueNet,
         game.print_move_log()
 
     # After review ends, plot evaluation and territory over move number
-    moves = list(range(len(evals)))
+    moves = list(range(move_count))
 
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 10))
     
@@ -306,7 +314,6 @@ def play_vs_net(policy_value_net: PolicyValueNet,
     ax1.set_ylabel("Value (–1 to +1)")
     ax1.grid(True)
 
-    # fix this silly plot - also in eval mode
     # Plot scores from the stored lists
     ax2.plot(moves, black_scores, label="Black Score")
     ax2.plot(moves, white_scores, label="White Score")
