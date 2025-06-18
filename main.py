@@ -31,18 +31,18 @@ def __main__():
     net = PolicyValueTransformer(BOARD_SIZE)
     # net.load_state_dict(torch.load("models/TorchGo-mini-light.pth"))
     net.to(device)
-    
+
     print(f"Number of parameters: {count_parameters(net)}")
 
     # Hyperparameters
-    num_iterations = 1  
-    games_per_iteration = 5  
-    num_playouts = 128  
-    c_puct = 1.5
-    temp_threshold = 4
+    num_iterations = 5  
+    games_per_iteration = 3  
+    num_playouts = 256  
+    c_puct = 1.25
+    temp_threshold = 2
     replay_capacity = 20480
     batch_size = 256
-    epochs_per_iter = 3  # increased from 3
+    epochs_per_iter = 5  # increased from 3
     lr = 1e-3
     l2_coef = 1e-4
 
@@ -69,7 +69,7 @@ def __main__():
         )
 
         # Save the model
-        torch.save(trained_net.state_dict(), "models/TorchGo-transformer-mini-test-1.pth")
+        torch.save(trained_net.state_dict(), "models/TorchGo-transformer-mini.pth")
         
         # Clean up
         del trained_net, replay_buffer

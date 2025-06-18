@@ -61,13 +61,20 @@ class TransformerBlock(nn.Module):
         # Self-attention with causal masking
         attn_mask = None
         if causal_mask:
+            # Get the actual sequence length from the input
             seq_len = x.size(1)
-            attn_mask = torch.triu(torch.ones(seq_len, seq_len), diagonal=1).bool().to(x.device)
+            # Create causal mask for the actual sequence length
+            attn_mask = torch.triu(torch.ones(seq_len, seq_len, device=x.device), diagonal=1).bool()
+            # Ensure mask is on the same device as input
+            attn_mask = attn_mask.to(x.device)
+        
+        # Ensure input is properly normalized
+        x_norm = self.norm1(x)
         
         attn_output, _ = self.attn(
-            self.norm1(x),
-            self.norm1(x),
-            self.norm1(x),
+            x_norm,
+            x_norm,
+            x_norm,
             attn_mask=attn_mask,
             need_weights=False
         )
@@ -78,13 +85,13 @@ class TransformerBlock(nn.Module):
 
 class PolicyValueTransformer(nn.Module):
     """Transformer-based Go policy and value network"""
-    def __init__(self, BOARD_SIZE, d_model=128, nhead=8, num_layers=12, dropout=0.1):
+    def __init__(self, BOARD_SIZE, d_model=128, nhead=4, num_layers=8, dropout=0.1):
         super().__init__()
         self.BOARD_SIZE = BOARD_SIZE
         self.num_positions = BOARD_SIZE * BOARD_SIZE
         self.d_model = d_model
         
-        # Input embedding: project 16 channels to d_model
+        # Input embedding: project 24 channels to d_model
         self.input_embedding = nn.Linear(24, d_model)
         
         # Positional encoding
@@ -92,10 +99,20 @@ class PolicyValueTransformer(nn.Module):
         
         # Transformer blocks
         self.transformer_blocks = nn.ModuleList([
-            TransformerBlock(d_model, nhead, dropout) 
+            TransformerBlock(d_model, nhead, dropout)
             for _ in range(num_layers)
         ])
-        
+
+        self.policy_blocks = nn.ModuleList([
+            TransformerBlock(d_model, nhead, dropout)
+            for _ in range(1)
+        ])
+
+        self.value_blocks = nn.ModuleList([
+            TransformerBlock(d_model, nhead, dropout)
+            for _ in range(1)
+        ])
+
         # Policy head
         self.policy_head = nn.Sequential(
             nn.LayerNorm(d_model),
@@ -110,8 +127,6 @@ class PolicyValueTransformer(nn.Module):
         # Value head
         self.value_head = nn.Sequential(
             nn.LayerNorm(d_model),
-            nn.Linear(d_model, d_model),
-            nn.GELU(),
             nn.Linear(d_model, 1),
             nn.Tanh())
 
@@ -138,20 +153,30 @@ class PolicyValueTransformer(nn.Module):
         
         # Add pass token: [B, seq_len+1, d_model]
         pass_tokens = self.pass_token.expand(batch_size, -1, -1)
-        x = torch.cat([x, pass_tokens], dim=1)
+        main_tokens = torch.cat([x, pass_tokens], dim=1)
         
         # Transformer processing
         for block in self.transformer_blocks:
-            x = block(x, causal_mask=True)
+            main_tokens = block(main_tokens, causal_mask=True)
+        
+        core_tokens = main_tokens
+
+        for block in self.policy_blocks:
+            main_tokens = block(main_tokens, causal_mask=True)
+        policy_tokens = main_tokens
+        
+        value_tokens = core_tokens
+        for block in self.value_blocks:
+            value_tokens = block(value_tokens, causal_mask=True)
         
         # Policy head
-        board_logits = self.policy_head(x[:, :-1])  # All board positions
-        pass_logit = self.pass_head(x[:, -1:])      # Pass token
+        board_logits = self.policy_head(policy_tokens[:, :-1])  # All board positions
+        pass_logit = self.pass_head(policy_tokens[:, -1:])      # Pass token
         policy_logits = torch.cat([board_logits, pass_logit], dim=1).squeeze(-1)
         policy = F.softmax(policy_logits, dim=1)
         
         # Value head uses global average pooling
-        global_rep = x.mean(dim=1)  # [B, d_model]
+        global_rep = value_tokens.mean(dim=1)  # [B, d_model]
         value = self.value_head(global_rep)
         
         return policy, value

@@ -23,11 +23,11 @@ def bot_vs_bot(
         temperature: float = 0.0,  # 0.0 for deterministic play, 1.0 for exploration
 ) -> dict:
     """
-    Let two PolicyValueNet models play against each other.
+    Let two PolicyValueNet or PolicyValueTransformer models play against each other.
     
     Args:
-        black_net: PolicyValueNet model playing as Black
-        white_net: PolicyValueNet model playing as White
+        black_net: model playing as Black
+        white_net: model playing as White
         device: Torch device to use
         num_playouts: Number of MCTS playouts per move
         c_puct: Exploration constant for MCTS
@@ -41,7 +41,7 @@ def bot_vs_bot(
         - winner: "black", "white", or "tie"
         - final_score: dict with black_score and white_score
         - move_history: list of moves if return_moves=True
-        - evaluation_history: list of evaluation values
+        - evaluation_history: dict with black and white evaluations
         - black_scores: list of black scores over time
         - white_scores: list of white scores over time
     """
@@ -51,7 +51,9 @@ def bot_vs_bot(
     BOARD_SIZE = game.BOARD_SIZE
     NUM_MOVES = BOARD_SIZE * BOARD_SIZE
 
-    evals = []
+    # Track evaluations from both models
+    black_evals = []  # Model A's evaluations
+    white_evals = []  # Model B's evaluations
     black_scores = []
     white_scores = []
     move_history = []
@@ -74,9 +76,15 @@ def bot_vs_bot(
                                   ], dim=1)
 
         with torch.no_grad():
-            raw_policy, eval = current_net(state_tensor)  # [1,361], [1,1]
+            # Get evaluations from both models
+            _, black_eval = black_net(state_tensor)
+            _, white_eval = white_net(state_tensor)
+            black_evals.append(float(black_eval.item()))
+            white_evals.append(float(white_eval.item()))
+            
+            # Get current model's policy
+            raw_policy, _ = current_net(state_tensor)  # [1,361], [1,1]
         raw_policy = raw_policy.squeeze(0)  # [361]
-        evals.append(float(eval.item()))
 
         # b) Plot raw policy heatmap if requested
         if displays:
@@ -132,7 +140,8 @@ def bot_vs_bot(
         white_scores.append(score['white_score'])
 
         if displays:
-            print(f"Evaluation (value ∈ [-1,+1], +1=Black wins, -1=White wins): {float(eval.item()):.3f}")
+            print(f"Black's evaluation: {float(black_eval.item()):.3f}")
+            print(f"White's evaluation: {float(white_eval.item()):.3f}")
             print(f"Current territory - Black: {score['black_score']}, White: {score['white_score']}\n")
 
     # Game is over: show final board and result
@@ -162,15 +171,17 @@ def bot_vs_bot(
 
     # Plot evaluation and territory over move number if requested
     if displays:
-        moves = list(range(len(evals)))
+        moves = list(range(len(black_evals)))
         fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 10))
         
-        # Plot evaluation values
-        ax1.plot(moves, evals, marker='o')
+        # Plot evaluation values from both models
+        ax1.plot(moves, black_evals, marker='o', label='Black (Model A)', color='black')
+        ax1.plot(moves, white_evals, marker='o', label='White (Model B)', color='gray')
         ax1.set_title("Value (Win Estimate) over Moves")
         ax1.set_xlabel("Move Number")
         ax1.set_ylabel("Value (–1 to +1)")
         ax1.grid(True)
+        ax1.legend()
 
         # Plot scores from the stored lists
         ax2.plot(moves, black_scores, label="Black Score")
@@ -189,7 +200,10 @@ def bot_vs_bot(
     results = {
         "winner": winner,
         "final_score": final_score,
-        "evaluation_history": evals,
+        "evaluation_history": {
+            "black": black_evals,
+            "white": white_evals
+        },
         "black_scores": black_scores,
         "white_scores": white_scores
     }

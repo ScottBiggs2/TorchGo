@@ -192,6 +192,12 @@ def play_vs_net(policy_value_net: PolicyValueNet,
             else:
                 game.play_move(user_move[0], user_move[1])
                 print(f"You played at {user_move}.\n")
+
+                    # Track scores after each move
+            score = game.score()
+            black_scores.append(score['black_score'])
+            white_scores.append(score['white_score'])
+            
         else:
             # ---- Network's turn ----
 
@@ -300,6 +306,7 @@ def play_vs_net(policy_value_net: PolicyValueNet,
     ax1.set_ylabel("Value (–1 to +1)")
     ax1.grid(True)
 
+    # fix this silly plot - also in eval mode
     # Plot scores from the stored lists
     ax2.plot(moves, black_scores, label="Black Score")
     ax2.plot(moves, white_scores, label="White Score")
