@@ -89,8 +89,10 @@ def compute_loss(
 class GoBoardTransform:
     """
     Custom transform for Go board data augmentation.
-    Handles both state tensor [B,16,19,19] and policy tensor [B,361].
+    Handles both state tensor [B,24,19,19] and policy tensor [B,361].
     The policy tensor includes an extra element at the end for passing.
+
+    *** Not implemented ***
     """
     def __init__(self, p_horizontal: float = 0.5, p_vertical: float = 0.5):
         self.p_horizontal = p_horizontal
@@ -150,7 +152,7 @@ def train_policy_value_net(
     epochs_per_iter: int,
     lr: float,
     l2_coef: float,
-    classic_or_mini: bool, # True = mini (9x9), False = classic (19x19)
+    model_save_path: str,
 ):
     optimizer = optim.Adam(net.parameters(), lr=lr, weight_decay= 1e-4)
 
@@ -169,7 +171,7 @@ def train_policy_value_net(
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
             
-            examples = play_self_play_game(net, device, num_playouts, c_puct, temp_threshold, classic_or_mini)
+            examples = play_self_play_game(net, device, num_playouts, c_puct, temp_threshold)
             iteration_examples.extend(examples)
             print(f"  Self-play game {g+1}/{games_per_iteration}: {len(examples)} positions.")
         game_end_time = time.time()
@@ -226,8 +228,13 @@ def train_policy_value_net(
         print(f" === \n Iteration {it+1} took: {(iter_end - iter_start):.2f}s")
         print(f" Games {(game_end_time - game_start_time)/games_per_iteration:.2f}s per game")
         print(f" Epochs avg {(epoch_end - epoch_start)/epochs_per_iter:.2f}s per epoch")
+
+        # Save model
+        torch.save(net.state_dict(), model_save_path)
+        print(f" Model saved to {model_save_path}")
         print(f" ===")
-        
+
+
         # Clear memory after each iteration
         if torch.cuda.is_available():
             torch.cuda.empty_cache()

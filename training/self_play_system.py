@@ -7,7 +7,6 @@ from collections import deque
 
 from boards.board_manager import GoGame
 from models.policy_value_model import PolicyValueNet
-# from mcts.monte_carlo_tree_search_nodes import MCTSNode
 from mcts.run_batched_mcts import run_batched_mcts
 from mcts.batch_mcts_node import MCTSNode
 from mcts.batch_mcts_node import generate_influence_fields
@@ -88,7 +87,6 @@ def play_self_play_game(
         num_playouts: int,
         c_puct: float,
         temp_threshold: int = 8,
-        classic_or_mini: bool = True, # mini
 ) -> List[Example]:
     """
     Play a full game via batched MCTS + the current policy_value_net.
@@ -102,7 +100,7 @@ def play_self_play_game(
     game = GoGame(BOARD_SIZE)
 
     # End games of extraordinary length
-    max_moves = 128 if classic_or_mini else 256
+    max_moves = 128 if BOARD_SIZE == 9 else 256
 
     move_count = 0
     while not game.game_over:

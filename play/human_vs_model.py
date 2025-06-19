@@ -56,8 +56,9 @@ def plot_board(game: GoGame, ax=None):
 
 def plot_policy(game: GoGame, policy_tensor: torch.Tensor, ax=None):
     """
-    Overlay a heatmap of the policy distribution (length‐361+1 tensor) on the board grid.
-    Axes labeled 0..18; origin at bottom-left. Uses float normalization.
+    Overlay a heatmap of the policy distribution (length = board_size^2 +1 tensor) on the board grid.
+    Axes labeled 0...board_size; 
+    origin at bottom-left. Uses float normalization.
     The last element of policy_tensor is the pass probability.
     """
     BOARD_SIZE = game.BOARD_SIZE
@@ -113,7 +114,9 @@ def plot_policy(game: GoGame, policy_tensor: torch.Tensor, ax=None):
 
 def get_user_move(game: GoGame):
     """
-    Prompt the user to enter a move as "x y" (0-based). Returns (x,y) or None for pass.
+    Prompt the user to enter a move as "row col" (0-based). Returns (row,col)
+    None or 'pass'for pass.
+    'end game' ends the game immediately. 
     """
     while True:
         move_str = input("Enter your move as 'row col' (or 'pass'): ").strip().lower()
@@ -144,8 +147,8 @@ def play_vs_net(policy_value_net: PolicyValueNet,
                 num_playouts: int,
                 c_puct: float,
                 board_size: int,
-                displays=False,
-                return_moves = False,
+                displays: bool =False, # toggle to show policy/mcts heatmaps
+                return_moves: bool = False, # toggle to return move history
                 ):
     """
     Let a human play against the network. You choose Black or White, then
@@ -324,7 +327,7 @@ def play_vs_net(policy_value_net: PolicyValueNet,
     ax2.grid(True)
 
     plt.tight_layout()
-    display(fig)
+    # display(fig)
     plt.close(fig)
     
     return fig

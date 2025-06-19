@@ -8,8 +8,8 @@ import psutil  # For memory monitoring
 from boards.board_manager import GoGame
 from models.policy_value_model import PolicyValueNet
 from models.policy_value_transformer import PolicyValueTransformer   
-from mcts.monte_carlo_tree_search_nodes import MCTSNode
-from mcts.run_monte_carlo_tree_search import run_mcts
+# from mcts.monte_carlo_tree_search_nodes import MCTSNode
+# from mcts.run_monte_carlo_tree_search import run_mcts
 from training.self_play_system import ReplayBuffer, play_self_play_game
 from training.training import train_policy_value_net, count_parameters
 from play.human_vs_model import play_vs_net
@@ -27,22 +27,33 @@ def __main__():
     
     BOARD_SIZE = 9
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    # net = PolicyValueNet(BOARD_SIZE)
-    net = PolicyValueTransformer(BOARD_SIZE)
-    # net.load_state_dict(torch.load("models/TorchGo-mini-light.pth"))
+    net = PolicyValueTransformer(BOARD_SIZE, d_model = 128,
+                                nhead = 4, num_layers = 6,
+                                num_head_layers = 2, dropout = 0.1)
+    
+    model_path = "models/TorchGo-transformer-9x9.pth"
+    net.load_state_dict(torch.load(model_path))
     net.to(device)
 
     print(f"Number of parameters: {count_parameters(net)}")
 
+    # Games trained on (as of 18/06/2025): 10 + 5x10 +
+    # Epochs trained on (as of 18/06/2025): 3 + 5x3 +
+
+    # Num Playouts | ~% of ideal results : Q = 1 -1/sqrt(N) or proportional to log(N) | time per game
+    # 128 | 92%  |  5 minutes/game  |
+    # 64  | 85%  |  1 minutes/game  |
+    # 800 | 96%  | * This is the setting used by AlphaGo for 9x9       
+
     # Hyperparameters
     num_iterations = 5  
-    games_per_iteration = 3  
-    num_playouts = 256  
-    c_puct = 1.25
-    temp_threshold = 2
-    replay_capacity = 20480
+    games_per_iteration = 10  
+    num_playouts = 64  
+    c_puct = 1.5
+    temp_threshold = 4
+    replay_capacity = 128000
     batch_size = 256
-    epochs_per_iter = 5  # increased from 3
+    epochs_per_iter = 3  
     lr = 1e-3
     l2_coef = 1e-4
 
@@ -65,11 +76,11 @@ def __main__():
             epochs_per_iter=epochs_per_iter,
             lr=lr,
             l2_coef=l2_coef,
-            classic_or_mini=True,  # True = mini (9x9), False = classic (19x19)
+            model_save_path = model_path
         )
 
         # Save the model
-        torch.save(trained_net.state_dict(), "models/TorchGo-transformer-mini.pth")
+        # torch.save(trained_net.state_dict(), "models/TorchGo-transformer-9x9.pth")
         
         # Clean up
         del trained_net, replay_buffer

@@ -11,6 +11,9 @@ from training.training import train_policy_value_net
 from play.human_vs_model import play_vs_net
 
 def do_training():
+    """
+    A script to demonstrate training a PolicyValueNet or PolicyValueTransformer model.
+    """
 
     BOARD_SIZE = 9
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -21,7 +24,7 @@ def do_training():
     games_per_iteration = 16  # how many self-play games each generation
     num_playouts = 64  # MCTS playouts per move (tune to budget)
     c_puct = 0.6
-    temp_threshold = 8 # layer < temp: check all policy draws, layer < temp, check c_puct proportion of draws
+    temp_threshold = 8 # layer < temp: check all policy draws, layer < temp
     replay_capacity = 4096
     batch_size = 64
     epochs_per_iter = 1
@@ -42,7 +45,6 @@ def do_training():
         epochs_per_iter=epochs_per_iter,
         lr=lr,
         l2_coef=l2_coef,
-        classic_or_mini = True, # True = mini (9x9), False = classic (19x19)
     )
 
     torch.save(trained_net.state_dict(), "models/TorchGo-mini-light.pth")

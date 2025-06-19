@@ -81,14 +81,31 @@ class TransformerBlock(nn.Module):
         x = x + attn_output
         x = x + self.mlp(self.norm2(x))
         return x
-
+    
 
 class PolicyValueTransformer(nn.Module):
-    """Transformer-based Go policy and value network"""
-    def __init__(self, BOARD_SIZE, d_model=128, nhead=4, num_layers=8, dropout=0.1):
+    """
+    Transformer-based Go policy and value network:
+    - Input: 24 channels (board, influence fields)
+    - Output: policy (move probabilities) and value (position evaluation)
+    - Transformer blocks:
+        - 2 blocks for policy (2 blocks per layer)
+        - 2 blocks for value (2 blocks per layer)
+    - Policy head:
+        - Linear layer to 1 output (move probabilities)
+    - Pass move head:
+        - Linear layer to 1 output (pass move probability)
+    - Value head:
+        - Linear layer to 1 output (position evaluation)
+    - Positional encoding:
+        - Adds positional information to the input
+    
+    """
+    def __init__(self, BOARD_SIZE, d_model=128, nhead=4, num_layers=6, num_head_layers = 1, dropout=0.1):
         super().__init__()
         self.BOARD_SIZE = BOARD_SIZE
         self.num_positions = BOARD_SIZE * BOARD_SIZE
+        trunk_channels = BOARD_SIZE * BOARD_SIZE +1
         self.d_model = d_model
         
         # Input embedding: project 24 channels to d_model
@@ -105,12 +122,12 @@ class PolicyValueTransformer(nn.Module):
 
         self.policy_blocks = nn.ModuleList([
             TransformerBlock(d_model, nhead, dropout)
-            for _ in range(1)
+            for _ in range(num_head_layers)
         ])
 
         self.value_blocks = nn.ModuleList([
             TransformerBlock(d_model, nhead, dropout)
-            for _ in range(1)
+            for _ in range(num_head_layers)
         ])
 
         # Policy head
@@ -133,7 +150,7 @@ class PolicyValueTransformer(nn.Module):
     def forward(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Input:
-          x: [B, 16, H, W] - 16-channel board representation
+          x: [B, 24, H, W] - 24-channel board representation from state_to_tensor
         Returns:
           policy: [B, H*W+1] - move probabilities
           value: [B, 1] - position evaluation
@@ -154,6 +171,8 @@ class PolicyValueTransformer(nn.Module):
         # Add pass token: [B, seq_len+1, d_model]
         pass_tokens = self.pass_token.expand(batch_size, -1, -1)
         main_tokens = torch.cat([x, pass_tokens], dim=1)
+
+        # print(f"main_tokens.shape: {main_tokens.shape}")
         
         # Transformer processing
         for block in self.transformer_blocks:
