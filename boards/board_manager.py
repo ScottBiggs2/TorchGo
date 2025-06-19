@@ -2,6 +2,9 @@ import torch
 from typing import Optional, Tuple, List
 
 class GoGame:
+    """
+    Object to manage Go games. Hold board information, manages rules, and game history. 
+    """
     def __init__(self, BOARD_SIZE):
         self.BLACK = -1
         self.WHITE = 1
@@ -167,32 +170,6 @@ class GoGame:
         # 2) Suicide?
         if self.is_suicide(x, y, self.current_player):
             return False
-
-            #     if len(self.history) >= 2:
-            # # Find the last move by the same player
-            # same_player_last_move = None
-            # for i in range(len(self.history) - 1, -1, -1):
-            #     if i % 2 == (len(self.history) - 1) % 2:  # Same player's turn
-            #         same_player_last_move = i
-            #         break
-            
-            # if same_player_last_move is not None:
-            #     # Simulate the current move
-            #     backup = self.copy_board()
-            #     backup[x, y] = self.current_player
-                
-            #     # Remove any captures
-            #     visited = set()
-            #     for nx, ny in self.get_neighbors(x, y):
-            #         if backup[nx, ny].item() == self.opponent(self.current_player) and (nx, ny) not in visited:
-            #             group = self._flood_fill_group(nx, ny, backup, visited)
-            #             if self._count_liberties(group, backup) == 0:
-            #                 for gx, gy in group:
-            #                     backup[gx, gy] = self.EMPTY
-                
-            #     # Check if the resulting board matches the same player's last move
-            #     if torch.equal(backup, self.history[same_player_last_move]):
-            #         return False
 
         # 3) Ko check: check if this move would make the board identical to same player's last move
         if self.last_same_player_move is not None:

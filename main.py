@@ -37,15 +37,14 @@ def __main__():
 
     print(f"Number of parameters: {count_parameters(net)}")
 
-    # Games trained on (as of 18/06/2025): 10 + 5x10 + 36x10
-    # Epochs trained on (as of 18/06/2025): 3 + 5x3 + 36x3
+    # Games trained on (as of 18/06/2025): 10 + 5x10 + 36x10 = 420
+    # Epochs trained on (as of 18/06/2025): 3 + 5x3 + 36x3 = 136
 
     # Num Playouts | ~% of ideal results : Q = 1 -1/sqrt(N) or proportional to log(N) | time per game
     # 128 | 92%  |  5 minutes/game  |
     # 64  | 85%  |  1 minutes/game  |
     # 800 | 96%  | * This is the setting used by AlphaGo for 9x9       
 
-    # ~10 min/iter, x6 = 1 hour, x8 = overnight 
     # Hyperparameters
     num_iterations = 50  
     games_per_iteration = 10  
