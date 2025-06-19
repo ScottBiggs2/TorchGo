@@ -12,6 +12,7 @@ from play.human_vs_model import plot_board, plot_policy, get_user_move
 def review_game(
         policy_value_net: PolicyValueNet,
         device: torch.device,
+        num_playouts: int,
         top_k: int,
         board_size: int,
         return_moves=True,
@@ -73,8 +74,8 @@ def review_game(
             game.clone(),
             policy_value_net,
             device,
-            num_playouts=100,  # Use fewer playouts for review mode
-            c_puct=5.0,
+            num_playouts=num_playouts,  # Use fewer playouts for review mode
+            c_puct=1.5,
             temperature=1.0,  # Use temperature=1 for review mode to show more variety
             training=False
         )
