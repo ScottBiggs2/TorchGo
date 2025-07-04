@@ -45,6 +45,22 @@ def __main__():
     # 64  | 85%  |  1 minutes/game  |
     # 800 | 96%  | * This is the setting used by AlphaGo for 9x9       
 
+    # Model params notes:
+    # Update to nheads = 1 to get stronger long range depenency capture 
+    # increase model dim (min_x where 2^x >= board_size**2 - naieve but at least rule based)
+    
+    # hyperparams notes:
+    # strength ~= f(num_playouts) ( see above ^^^)
+    # temp_threshold = 4 - increase to widen search. I have a hunch that early in training width > depth for PPO
+    
+    # to-do:
+    # make epochs_per_iter a function of proportion of replay capacity filled (maybe also batch-size?)
+    # increase sparsity penalty
+    # add cosine annealing or reduce on plateau LR scheduler
+    # fix the colab notebook so people can actually see it? I hate colab :(
+    
+    # Redesign: learn a likely-to-be controlled territory mask function to help value head converge
+
     # Hyperparameters
     num_iterations = 50  
     games_per_iteration = 10  
